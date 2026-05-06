@@ -1982,6 +1982,7 @@ function loadData() {
     holidays: [],
     smsCampaigns: [],
     smsTemplates: [],
+    courses: [],
     settings: {
       adminEmail: 'contact@robbomaster.ro',
       consecutiveAbsenceThreshold: 2,
@@ -2248,6 +2249,7 @@ const NAV_ITEMS = {
   admin: [
     { id: 'dashboard', icon: 'dashboard', label: 'Dashboard' },
     { id: 'clubs', icon: 'building', label: 'Cluburi' },
+    { id: 'groups', icon: 'bookOpen', label: 'Grupe' },
     { id: 'students', icon: 'users', label: 'Copii' },
     { id: 'teachers', icon: 'user', label: 'Profesori' },
     { id: 'leads', icon: 'inbox', label: 'Lead-uri', badgeKey: 'leads' },
@@ -2261,6 +2263,7 @@ const NAV_ITEMS = {
   manager: [
     { id: 'dashboard', icon: 'dashboard', label: 'Dashboard' },
     { id: 'clubs', icon: 'building', label: 'Clubul meu' },
+    { id: 'groups', icon: 'bookOpen', label: 'Grupe' },
     { id: 'students', icon: 'users', label: 'Copii' },
     { id: 'leads', icon: 'inbox', label: 'Lead-uri', badgeKey: 'leads' },
     { id: 'payments', icon: 'banknote', label: 'Plăți' },
@@ -2382,6 +2385,7 @@ function render() {
     case 'dashboard': renderDashboard(main); break;
     case 'clubs': renderClubs(main); break;
     case 'club-detail': renderClubDetail(main); break;
+    case 'groups': renderGroups(main); break;
     case 'group-detail': renderGroupDetail(main); break;
     case 'students': renderStudents(main); break;
     case 'student-detail': renderStudentDetail(main); break;
@@ -3233,16 +3237,21 @@ function groupCardHtml(g) {
   const club = getClub(g.clubId);
   const teacher = getUser(g.teacherId);
   const students = getStudentsInGroup(g.id);
+  const dayIdx = g.dayOfWeek !== undefined ? g.dayOfWeek : g.day;
+  const isIncomplete = !g.course || !g.teacherId;
+  const displayName = g.name && g.name.trim() ? g.name : (g.course ? g.course : 'Necompletă');
   return `
-    <div class="group-card" onclick="navigateTo('group-detail', { groupId: '${g.id}', clubId: '${g.clubId}' })">
-      <div class="group-card-time">${g.time} • ${g.duration} min</div>
-      <div class="group-card-name">${g.name}</div>
-      <div class="group-card-meta">${ICONS.mapPin} ${club ? club.name : '—'}</div>
-      <div class="group-card-meta">${ICONS.user} ${teacher ? teacher.name : '—'}</div>
+    <div class="group-card" style="position:relative;" onclick="navigateTo('group-detail', { groupId: '${g.id}', clubId: '${g.clubId}' })">
+      <div class="group-card-time">${DAYS[dayIdx] || ''} ${g.time} • ${g.duration} min</div>
+      <div class="group-card-name">${escapeHtml(displayName)}</div>
+      <div class="group-card-meta">${ICONS.mapPin} ${club ? escapeHtml(club.name) : '—'}</div>
+      <div class="group-card-meta">${ICONS.user} ${teacher ? escapeHtml(teacher.name) : '<em style="color:var(--warning);">— neatribuit —</em>'}</div>
       <div class="group-card-stats">
         <span>${ICONS.users} ${students.length}/${g.capacity}</span>
-        <span class="badge badge-neutral" style="font-size:10px;">${g.course}</span>
+        ${g.course ? `<span class="badge badge-neutral" style="font-size:10px;">${escapeHtml(g.course)}</span>` : ''}
+        ${g.ageRange ? `<span class="badge badge-blue" style="font-size:10px;">${escapeHtml(g.ageRange)}</span>` : ''}
       </div>
+      ${isIncomplete ? `<div style="position:absolute; top:8px; right:8px;"><span class="badge badge-yellow" style="font-size:10px;">⚠ Necompletă</span></div>` : ''}
     </div>
   `;
 }
@@ -3704,6 +3713,220 @@ async function confirmDeleteClub(id) {
 // ==========================================================================
 // CLUB DETAIL
 // ==========================================================================
+// ==========================================================================
+// GROUPS PAGE (central view, with filters)
+// ==========================================================================
+let groupsFilter = {
+  search: '',
+  clubId: 'all',
+  teacherId: 'all',
+  day: 'all',
+  status: 'all',
+};
+
+function renderGroups(el) {
+  // Determine which groups the current user can see
+  let allGroups = state.data.groups;
+  let scopeClubs = state.data.clubs;
+  if (state.currentRole === 'manager') {
+    scopeClubs = getMyClubs();
+    const myClubIds = new Set(scopeClubs.map(c => c.id));
+    allGroups = allGroups.filter(g => myClubIds.has(g.clubId));
+  }
+  // Note: teachers go through 'my-groups' route, not this page
+
+  // Apply filters
+  let groups = [...allGroups];
+  if (groupsFilter.search) {
+    const q = groupsFilter.search.toLowerCase();
+    groups = groups.filter(g =>
+      (g.course && g.course.toLowerCase().includes(q)) ||
+      (g.name && g.name.toLowerCase().includes(q)) ||
+      (g.ageRange && g.ageRange.toLowerCase().includes(q))
+    );
+  }
+  if (groupsFilter.clubId !== 'all') groups = groups.filter(g => g.clubId === groupsFilter.clubId);
+  if (groupsFilter.teacherId !== 'all') {
+    if (groupsFilter.teacherId === 'unassigned') {
+      groups = groups.filter(g => !g.teacherId);
+    } else {
+      groups = groups.filter(g => g.teacherId === groupsFilter.teacherId);
+    }
+  }
+  if (groupsFilter.day !== 'all') groups = groups.filter(g => {
+    const dayIdx = g.dayOfWeek !== undefined ? g.dayOfWeek : g.day;
+    return dayIdx === parseInt(groupsFilter.day);
+  });
+  if (groupsFilter.status !== 'all') {
+    if (groupsFilter.status === 'incomplete') {
+      groups = groups.filter(g => !g.course || !g.teacherId);
+    } else if (groupsFilter.status === 'configured') {
+      groups = groups.filter(g => g.course && g.teacherId);
+    }
+  }
+
+  // Sort: by club name, then by day, then by time
+  const dayOrder = (g) => g.dayOfWeek !== undefined ? g.dayOfWeek : g.day;
+  groups.sort((a, b) => {
+    const ca = getClub(a.clubId), cb = getClub(b.clubId);
+    if (ca && cb && ca.name !== cb.name) return ca.name.localeCompare(cb.name);
+    if (dayOrder(a) !== dayOrder(b)) return dayOrder(a) - dayOrder(b);
+    return (a.time || '').localeCompare(b.time || '');
+  });
+
+  const teachers = state.data.users.filter(u => u.role === 'teacher');
+  const incompleteCount = allGroups.filter(g => !g.course || !g.teacherId).length;
+  const configuredCount = allGroups.length - incompleteCount;
+  const isAdmin = state.currentRole === 'admin';
+  const canCreate = isAdmin || state.currentRole === 'manager';
+
+  el.innerHTML = `
+    <div class="page-header">
+      <div class="page-title-wrap">
+        <div class="page-title">Grupe</div>
+        <div class="page-sub">${allGroups.length} grupe total • ${configuredCount} configurate • ${incompleteCount} necompletate</div>
+      </div>
+      <div class="page-actions">
+        ${canCreate && scopeClubs.length > 0 ? `<button class="btn btn-primary" onclick="openGroupModalChooseClub()">${ICONS.plus} Adaugă grupă</button>` : ''}
+      </div>
+    </div>
+
+    ${allGroups.length === 0 ? `
+      <div class="empty-state">
+        <div class="empty-state-icon">${ICONS.bookOpen}</div>
+        <h3>Nicio grupă creată</h3>
+        <p>${isAdmin ? 'Mergi la Setări → Inițializare pentru a genera automat grupele standard.' : 'Cere admin-ului să genereze grupele.'}</p>
+        ${isAdmin ? `<button class="btn btn-primary mt-2" onclick="state.currentPage='settings'; settingsTab='init'; render();">${ICONS.settings} Mergi la Setări</button>` : ''}
+      </div>
+    ` : `
+      <div class="card" style="padding:14px; margin-bottom:14px;">
+        <div class="filters-row">
+          <div class="form-group" style="flex:2; min-width:200px;">
+            <label style="font-size:11px;">Caută</label>
+            <input type="text" placeholder="curs, nume, vârstă..." value="${escapeHtml(groupsFilter.search)}" oninput="groupsFilter.search = this.value; render();">
+          </div>
+          <div class="form-group" style="min-width:140px;">
+            <label style="font-size:11px;">Club</label>
+            <select onchange="groupsFilter.clubId = this.value; render();">
+              <option value="all">Toate</option>
+              ${scopeClubs.map(c => `<option value="${c.id}" ${groupsFilter.clubId === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group" style="min-width:140px;">
+            <label style="font-size:11px;">Profesor</label>
+            <select onchange="groupsFilter.teacherId = this.value; render();">
+              <option value="all">Toți</option>
+              <option value="unassigned" ${groupsFilter.teacherId === 'unassigned' ? 'selected' : ''}>— Neatribuit —</option>
+              ${teachers.map(t => `<option value="${t.id}" ${groupsFilter.teacherId === t.id ? 'selected' : ''}>${escapeHtml(t.name)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group" style="min-width:120px;">
+            <label style="font-size:11px;">Ziua</label>
+            <select onchange="groupsFilter.day = this.value; render();">
+              <option value="all">Toate</option>
+              ${DAYS.map((d, i) => `<option value="${i}" ${groupsFilter.day === String(i) ? 'selected' : ''}>${d}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group" style="min-width:130px;">
+            <label style="font-size:11px;">Status</label>
+            <select onchange="groupsFilter.status = this.value; render();">
+              <option value="all">Toate</option>
+              <option value="configured" ${groupsFilter.status === 'configured' ? 'selected' : ''}>✓ Configurate</option>
+              <option value="incomplete" ${groupsFilter.status === 'incomplete' ? 'selected' : ''}>⚠ Necompletate</option>
+            </select>
+          </div>
+          <div class="form-group" style="min-width:auto; flex:0;">
+            <label style="font-size:11px; visibility:hidden;">_</label>
+            <button class="btn btn-ghost btn-sm" onclick="resetGroupsFilters()">${ICONS.x} Reset</button>
+          </div>
+        </div>
+      </div>
+
+      ${groups.length === 0 ? `
+        <div class="empty-state">
+          <div class="empty-state-icon">${ICONS.search}</div>
+          <h3>Niciun rezultat</h3>
+          <p>Nicio grupă nu corespunde filtrelor selectate.</p>
+        </div>
+      ` : `
+        <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:12px;">
+          ${groups.map(g => groupCardListItemHtml(g)).join('')}
+        </div>
+      `}
+    `}
+  `;
+}
+
+function resetGroupsFilters() {
+  groupsFilter = { search: '', clubId: 'all', teacherId: 'all', day: 'all', status: 'all' };
+  render();
+}
+
+function groupCardListItemHtml(g) {
+  const club = getClub(g.clubId);
+  const teacher = getUser(g.teacherId);
+  const students = getStudentsInGroup(g.id);
+  const dayIdx = g.dayOfWeek !== undefined ? g.dayOfWeek : g.day;
+  const isIncomplete = !g.course || !g.teacherId;
+  const isAdmin = state.currentRole === 'admin';
+  const canEdit = isAdmin || state.currentRole === 'manager';
+  return `
+    <div class="club-card" style="position:relative;">
+      <div onclick="navigateTo('group-detail', { groupId: '${g.id}', clubId: '${g.clubId}' })" style="cursor:pointer;">
+        ${isIncomplete ? `<div style="margin-bottom:8px;"><span class="badge badge-yellow" style="font-size:10px;">⚠ Necompletă</span></div>` : ''}
+        <div class="club-card-name" style="font-size:14px; margin-bottom:4px;">
+          ${g.course ? escapeHtml(g.course) : '<em style="color:var(--text-soft);">— fără curs —</em>'}
+          ${g.ageRange ? `<span style="font-weight:400; color:var(--text-soft); font-size:13px;"> · ${escapeHtml(g.ageRange)}</span>` : ''}
+        </div>
+        <div class="club-card-address" style="font-size:12.5px;">
+          ${ICONS.mapPin} ${club ? escapeHtml(club.name) : '—'}
+        </div>
+        <div class="row" style="font-size:12.5px; color:var(--text-soft); margin-top:6px;">
+          ${ICONS.calendar} <span>${DAYS[dayIdx] || '?'} ${g.time} (${g.duration}min)</span>
+        </div>
+        <div class="row" style="font-size:12.5px; color:var(--text-soft); margin-top:4px;">
+          ${ICONS.user} <span>${teacher ? escapeHtml(teacher.name) : '<em style="color:var(--warning);">— neatribuit —</em>'}</span>
+        </div>
+        <div class="row" style="font-size:12.5px; color:var(--text-soft); margin-top:4px;">
+          ${ICONS.users} <span>${students.length} / ${g.capacity} copii</span>
+        </div>
+      </div>
+      ${canEdit ? `
+        <div style="position:absolute; top:10px; right:10px; display:flex; gap:4px;">
+          <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); openGroupModal('${g.id}')" title="Editează">${ICONS.edit}</button>
+          ${isAdmin ? `<button class="btn btn-sm btn-danger-soft" onclick="event.stopPropagation(); deleteGroup('${g.id}')" title="Șterge">${ICONS.trash}</button>` : ''}
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+function openGroupModalChooseClub() {
+  // If there's only one club, go directly there
+  const clubs = state.currentRole === 'manager' ? getMyClubs() : state.data.clubs;
+  if (clubs.length === 0) {
+    showToast('Nu există cluburi. Inițializează întâi cluburile.', 'error');
+    return;
+  }
+  if (clubs.length === 1) {
+    openGroupModal(null, clubs[0].id);
+    return;
+  }
+  openModal('Alege clubul', `
+    <div style="font-size:13px; color:var(--text-soft); margin-bottom:14px;">Selectează clubul pentru grupa nouă:</div>
+    <div style="display:flex; flex-direction:column; gap:8px;">
+      ${clubs.map(c => `
+        <button class="btn" style="justify-content:flex-start; padding:14px;" onclick="closeModal(); openGroupModal(null, '${c.id}');">
+          ${ICONS.building} ${escapeHtml(c.name)} <span style="margin-left:auto; color:var(--text-soft); font-size:12px;">${getGroupsInClub(c.id).length} grupe</span>
+        </button>
+      `).join('')}
+    </div>
+  `, `<button class="btn" onclick="closeModal()">Anulează</button>`, 'sm');
+}
+
+// ==========================================================================
+// CLUB DETAIL
+// ==========================================================================
 function renderClubDetail(el) {
   const club = getClub(state.currentClubId);
   if (!club) { state.currentPage = 'clubs'; render(); return; }
@@ -3810,41 +4033,55 @@ function renderClubDetail(el) {
 function openGroupModal(id, clubId) {
   const g = id ? getGroup(id) : null;
   const cId = clubId || (g && g.clubId);
+  const club = cId ? getClub(cId) : null;
+  // Build datalist of existing courses (saved in catalog OR used in groups)
+  const existingCourses = new Set();
+  (state.data.courses || []).forEach(c => c.name && existingCourses.add(c.name));
+  state.data.groups.forEach(grp => grp.course && existingCourses.add(grp.course));
+  const courseSuggestions = Array.from(existingCourses).sort();
+
+  // Same for age ranges
+  const existingAges = new Set(['5-6 ani', '7-9 ani', '10-12 ani', '13-15 ani', '14+ ani']);
+  state.data.groups.forEach(grp => grp.ageRange && existingAges.add(grp.ageRange));
+  const ageSuggestions = Array.from(existingAges);
+
+  // Available teachers
+  const teachers = state.data.users.filter(u => u.role === 'teacher');
+
   openModal(g ? 'Editează grupă' : 'Grupă nouă', `
-    <div class="form-group">
-      <label class="label-required">Nume grupă</label>
-      <input id="group-name" type="text" value="${g ? g.name : ''}" placeholder="ex. Robotică începători 7-9 ani">
-    </div>
+    ${club ? `<div class="text-soft mb-2" style="font-size:13px;">${ICONS.building} ${escapeHtml(club.name)}</div>` : ''}
+
     <div class="form-row">
       <div class="form-group">
         <label class="label-required">Tip curs</label>
-        <select id="group-course">
-          <option value="Robotică" ${g && g.course === 'Robotică' ? 'selected' : ''}>Robotică</option>
-          <option value="Programare" ${g && g.course === 'Programare' ? 'selected' : ''}>Programare</option>
-          <option value="AI Kids" ${g && g.course === 'AI Kids' ? 'selected' : ''}>AI Kids</option>
-        </select>
+        <input id="group-course" type="text" list="course-suggestions" value="${g ? escapeHtml(g.course || '') : ''}" placeholder="ex. Robotică, Programare, AI Kids">
+        <datalist id="course-suggestions">
+          ${courseSuggestions.map(c => `<option value="${escapeHtml(c)}">`).join('')}
+        </datalist>
+        <div class="text-dim fs-xs mt-1">Scrie liber sau alege din sugestii</div>
       </div>
       <div class="form-group">
-        <label class="label-required">Nivel vârstă</label>
-        <select id="group-age">
-          <option value="5-6" ${g && g.ageLevel === '5-6' ? 'selected' : ''}>5-6 ani</option>
-          <option value="7-9" ${g && g.ageLevel === '7-9' ? 'selected' : ''}>7-9 ani</option>
-          <option value="10-12" ${g && g.ageLevel === '10-12' ? 'selected' : ''}>10-12 ani</option>
-          <option value="14+" ${g && g.ageLevel === '14+' ? 'selected' : ''}>14+ ani</option>
-        </select>
+        <label class="label-required">Interval vârstă</label>
+        <input id="group-age" type="text" list="age-suggestions" value="${g ? escapeHtml(g.ageRange || g.ageLevel || '') : ''}" placeholder="ex. 7-9 ani">
+        <datalist id="age-suggestions">
+          ${ageSuggestions.map(a => `<option value="${escapeHtml(a)}">`).join('')}
+        </datalist>
       </div>
     </div>
+
     <div class="form-group">
-      <label class="label-required">Profesor</label>
+      <label>Profesor</label>
       <select id="group-teacher">
-        <option value="">Alege profesorul</option>
-        ${state.data.users.filter(u => u.role === 'teacher').map(u => `<option value="${u.id}" ${g && g.teacherId === u.id ? 'selected' : ''}>${u.name} (${u.specialty})</option>`).join('')}
+        <option value="">— Neatribuit —</option>
+        ${teachers.map(u => `<option value="${u.id}" ${g && g.teacherId === u.id ? 'selected' : ''}>${escapeHtml(u.name)}${u.specialty ? ' (' + escapeHtml(u.specialty) + ')' : ''}</option>`).join('')}
       </select>
+      ${teachers.length === 0 ? '<div class="text-dim fs-xs mt-1">⚠ Niciun profesor în sistem. Admin-ul trebuie să adauge profesori.</div>' : ''}
     </div>
+
     <div class="form-row-3">
       <div class="form-group">
         <label class="label-required">Ziua</label>
-        <select id="group-day">${DAYS.map((d,i) => `<option value="${i}" ${g && g.day === i ? 'selected' : ''}>${d}</option>`).join('')}</select>
+        <select id="group-day">${DAYS.map((d,i) => `<option value="${i}" ${g && (g.dayOfWeek === i || g.day === i) ? 'selected' : ''}>${d}</option>`).join('')}</select>
       </div>
       <div class="form-group">
         <label class="label-required">Ora</label>
@@ -3852,38 +4089,121 @@ function openGroupModal(id, clubId) {
       </div>
       <div class="form-group">
         <label>Durată (min)</label>
-        <input id="group-duration" type="number" value="${g ? g.duration : 90}" min="15" step="15">
+        <input id="group-duration" type="number" value="${g ? g.duration : 60}" min="15" step="15">
       </div>
     </div>
-    <div class="form-group">
-      <label>Capacitate maximă</label>
-      <input id="group-capacity" type="number" value="${g ? g.capacity : 12}" min="1" max="30">
+
+    <div class="form-row">
+      <div class="form-group">
+        <label>Capacitate</label>
+        <input id="group-capacity" type="number" value="${g ? g.capacity : 6}" min="1" max="30">
+      </div>
+      <div class="form-group">
+        <label>Nume custom (opțional)</label>
+        <input id="group-name" type="text" value="${g ? escapeHtml(g.name || '') : ''}" placeholder="auto-generat dacă lași gol">
+      </div>
     </div>
+
+    <div id="group-modal-error" style="display:none;" class="login-error mt-2"></div>
   `, `
     <button class="btn" onclick="closeModal()">Anulează</button>
-    <button class="btn btn-primary" onclick="saveGroup('${id || ''}', '${cId}')">Salvează</button>
+    <button class="btn btn-primary" id="group-save-btn" onclick="saveGroup('${id || ''}', '${cId || ''}')">${g ? 'Salvează' : 'Adaugă grupă'}</button>
   `, 'lg');
 }
 
-function saveGroup(id, clubId) {
+async function saveGroup(id, clubId) {
+  const courseVal = document.getElementById('group-course').value.trim();
   const data = {
     clubId,
-    name: document.getElementById('group-name').value.trim(),
-    course: document.getElementById('group-course').value,
-    ageLevel: document.getElementById('group-age').value,
-    teacherId: document.getElementById('group-teacher').value,
-    day: parseInt(document.getElementById('group-day').value),
+    course: courseVal,
+    ageRange: document.getElementById('group-age').value.trim(),
+    teacherId: document.getElementById('group-teacher').value || null,
+    dayOfWeek: parseInt(document.getElementById('group-day').value),
     time: document.getElementById('group-time').value,
-    duration: parseInt(document.getElementById('group-duration').value),
-    capacity: parseInt(document.getElementById('group-capacity').value),
-    schoolYearId: 'sy1',
+    duration: parseInt(document.getElementById('group-duration').value) || 60,
+    capacity: parseInt(document.getElementById('group-capacity').value) || 6,
+    name: document.getElementById('group-name').value.trim(),
   };
-  if (!data.name || !data.teacherId) { showToast('Completează câmpurile obligatorii', 'error'); return; }
-  if (id) Object.assign(getGroup(id), data);
-  else state.data.groups.push({ id: 'g' + Date.now(), ...data });
+  // Status: 'configured' if has course AND teacher, else 'incomplete'
+  data.status = (data.course && data.teacherId) ? 'configured' : 'incomplete';
+
+  const errEl = document.getElementById('group-modal-error');
+  const btn = document.getElementById('group-save-btn');
+  errEl.style.display = 'none';
+
+  if (!data.clubId) {
+    errEl.textContent = 'Lipsește clubul'; errEl.style.display = ''; return;
+  }
+  if (data.dayOfWeek === undefined || isNaN(data.dayOfWeek)) {
+    errEl.textContent = 'Selectează ziua'; errEl.style.display = ''; return;
+  }
+  if (!data.time) {
+    errEl.textContent = 'Setează ora'; errEl.style.display = ''; return;
+  }
+  if (!window.firebaseReady) {
+    errEl.textContent = 'Firebase încă se încarcă...'; errEl.style.display = ''; return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Se salvează...';
+
+  let result;
+  if (id) {
+    result = await window.firestoreUpdateGroup(id, data);
+  } else {
+    result = await window.firestoreCreateGroup(data);
+  }
+
+  // Auto-add new course to catalog if not already there
+  if (result.success && courseVal) {
+    const exists = (state.data.courses || []).some(c => c.name === courseVal)
+                || state.data.groups.some(grp => grp.course === courseVal && grp.id !== id);
+    if (!exists && window.firestoreCreateCourse) {
+      window.firestoreCreateCourse(courseVal); // fire-and-forget
+    }
+  }
+
+  btn.disabled = false;
+  if (!result.success) {
+    errEl.textContent = result.error;
+    errEl.style.display = '';
+    btn.textContent = id ? 'Salvează' : 'Adaugă grupă';
+    return;
+  }
+
   closeModal();
-  showToast('Grupă salvată', 'success');
-  render();
+  showToast(id ? 'Grupă actualizată' : 'Grupă adăugată', 'success');
+}
+
+async function deleteGroup(id) {
+  const g = getGroup(id);
+  if (!g) return;
+  const club = getClub(g.clubId);
+  openModal('Șterge grupă', `
+    <div style="text-align:center; padding: 8px 0;">
+      <div style="font-size:42px; margin-bottom:12px;">⚠️</div>
+      <div style="font-size:15px; color:var(--text); margin-bottom:6px; font-weight:600;">Sigur ștergi această grupă?</div>
+      <div style="font-size:13px; color:var(--text-soft);">
+        ${escapeHtml(g.course || '(fără curs)')} — ${club ? escapeHtml(club.name) : ''}<br>
+        ${DAYS[g.dayOfWeek !== undefined ? g.dayOfWeek : g.day]} ${g.time} (${g.duration} min)
+      </div>
+      <div style="font-size:12px; color:var(--text-soft); margin-top:10px;">Copiii înscriși vor rămâne fără grupă.</div>
+    </div>
+  `, `
+    <button class="btn" onclick="closeModal()">Anulează</button>
+    <button class="btn btn-primary" onclick="confirmDeleteGroup('${id}')" style="background:var(--danger); color:white; border-color:var(--danger);">Șterge definitiv</button>
+  `);
+}
+
+async function confirmDeleteGroup(id) {
+  closeModal();
+  if (!window.firebaseReady) return;
+  const result = await window.firestoreDeleteGroup(id);
+  if (!result.success) {
+    showToast('Eroare: ' + result.error, 'error');
+    return;
+  }
+  showToast('Grupă ștearsă', 'success');
 }
 
 // ==========================================================================
@@ -6442,10 +6762,18 @@ function renderInitSettings() {
   const clubsExist = state.data.clubs.length > 0;
   const expectedNames = ['RMA Tătărași', 'RMA Păcurari'];
   const allExpectedExist = expectedNames.every(name => state.data.clubs.some(c => c.name === name));
+
+  // Groups status: how many clubs need groups
+  const totalGroups = state.data.groups.length;
+  const expectedGroupsTotal = state.data.clubs.length * 18;
+  const clubsWithoutGroups = state.data.clubs.filter(c => {
+    return state.data.groups.filter(g => g.clubId === c.id).length === 0;
+  });
+
   return `
     <div class="card">
       <div class="card-header">
-        <div class="card-title">Inițializare cluburi RMA</div>
+        <div class="card-title">Pasul 1 — Inițializare cluburi RMA</div>
       </div>
       <div class="alert-banner info">
         <div class="alert-banner-icon">i</div>
@@ -6478,14 +6806,58 @@ function renderInitSettings() {
 
     <div class="card mt-3">
       <div class="card-header">
+        <div class="card-title">Pasul 2 — Generare grupe standard</div>
+      </div>
+      <div class="alert-banner info">
+        <div class="alert-banner-icon">i</div>
+        <div class="alert-banner-content">
+          <div class="alert-banner-title">18 grupe per club, generate automat</div>
+          <div class="alert-banner-desc">
+            Click pe butonul de mai jos și CRM-ul va crea automat 18 grupe pentru fiecare club RMA, conform programului standard
+            (Lu–Vi 15:00/16:00/18:00 + Sb 10:00/12:00/14:00).<br>
+            Grupele vor fi inițial <strong>goale</strong> (fără profesor și fără curs), urmând să le configurezi din pagina Grupe.
+          </div>
+        </div>
+      </div>
+
+      ${!clubsExist ? `
+        <div class="alert-banner warning">
+          <div class="alert-banner-icon">!</div>
+          <div class="alert-banner-content">
+            <div class="alert-banner-title">Cluburile lipsesc</div>
+            <div class="alert-banner-desc">Trebuie întâi să inițializezi cluburile (Pasul 1 de mai sus).</div>
+          </div>
+        </div>
+      ` : clubsWithoutGroups.length === 0 ? `
+        <div class="alert-banner success">
+          <div class="alert-banner-icon">✓</div>
+          <div class="alert-banner-content">
+            <div class="alert-banner-title">Toate cluburile au grupe</div>
+            <div class="alert-banner-desc">${totalGroups} grupe create. Le poți gestiona din pagina <a href="#" onclick="state.currentPage='groups'; render(); return false;" style="color:var(--primary); font-weight:600;">Grupe</a>.</div>
+          </div>
+        </div>
+      ` : `
+        <div style="font-size:13px; color:var(--text-soft); margin-bottom:10px;">
+          Cluburi fără grupe: <strong>${clubsWithoutGroups.map(c => escapeHtml(c.name)).join(', ')}</strong>
+        </div>
+        <div class="mt-3">
+          <button class="btn btn-primary" id="seed-groups-btn" onclick="seedAllGroups()">
+            ${ICONS.plus} Generează ${clubsWithoutGroups.length * 18} grupe (${clubsWithoutGroups.length} cluburi × 18)
+          </button>
+        </div>
+      `}
+    </div>
+
+    <div class="card mt-3">
+      <div class="card-header">
         <div class="card-title">Programul săptămânal RMA</div>
       </div>
       <div style="font-size:13px; color:var(--text-soft); margin-bottom:10px;">
-        Programul de mai jos este standard pentru ambele cluburi RMA și se salvează la club, urmând a fi folosit la crearea grupelor în Etapa 2.
+        Acesta este programul standard al ambelor cluburi RMA. Va fi folosit la generarea automată a grupelor.
       </div>
       <div class="row" style="gap:24px; flex-wrap:wrap;">
         <div>
-          <strong style="font-size:13px;">Luni–Vineri</strong>
+          <strong style="font-size:13px;">Luni–Vineri (5 zile)</strong>
           <ul style="margin:6px 0 0 0; padding-left:18px; font-size:12.5px; color:var(--text-soft);">
             <li>15:00 — 60 min × 6 copii</li>
             <li>16:00 — 90 min × 6 copii</li>
@@ -6501,12 +6873,36 @@ function renderInitSettings() {
           </ul>
         </div>
         <div style="align-self:center;">
+          <div style="font-size:24px; font-weight:700; color:var(--primary);">18</div>
+          <div style="font-size:11px; color:var(--text-soft);">Grupe / club / săptămână</div>
+        </div>
+        <div style="align-self:center;">
           <div style="font-size:24px; font-weight:700; color:var(--primary);">108</div>
           <div style="font-size:11px; color:var(--text-soft);">Capacitate săptămânală</div>
         </div>
       </div>
     </div>
   `;
+}
+
+async function seedAllGroups() {
+  const btn = document.getElementById('seed-groups-btn');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Se generează grupele...';
+  }
+  if (!window.firebaseReady) {
+    showToast('Firebase încă se încarcă...', 'error');
+    if (btn) btn.disabled = false;
+    return;
+  }
+  const result = await window.firestoreSeedAllGroups();
+  if (!result.success) {
+    showToast('Eroare: ' + result.error, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'Generează grupele'; }
+    return;
+  }
+  showToast(`${result.count} grupe generate cu succes pentru ${result.clubsProcessed} cluburi!`, 'success');
 }
 
 async function seedInitialClubs() {
@@ -7140,6 +7536,236 @@ document.addEventListener('DOMContentLoaded', init);
       return { success: true };
     } catch (err) {
       console.error('Update user error:', err);
+      return { success: false, error: window.fbErrorMessage(err) };
+    }
+  };
+
+  // ============================================================================
+  // FIRESTORE CRUD: GROUPS
+  // ============================================================================
+
+  let unsubscribeGroups = null;
+  let unsubscribeCourses = null;
+
+  // Extend startFirestoreListeners to also listen for groups + courses
+  const _origStartListeners = window.startFirestoreListeners;
+  window.startFirestoreListeners = function() {
+    _origStartListeners();
+
+    // Listen to groups collection
+    if (unsubscribeGroups) unsubscribeGroups();
+    unsubscribeGroups = onSnapshot(
+      collection(db, 'groups'),
+      (snap) => {
+        const groups = [];
+        snap.forEach(docSnap => {
+          const data = docSnap.data();
+          groups.push({
+            id: docSnap.id,
+            ...data,
+            // Legacy compatibility: existing rendering code uses `day` (0=Mon) and `name`
+            day: data.dayOfWeek !== undefined ? data.dayOfWeek : data.day,
+            name: data.name || autoGroupName(data),
+          });
+        });
+        console.log('[Firestore] Groups sync:', groups.length, 'groups');
+        if (state.data) {
+          state.data.groups = groups;
+          if (state.isAuthenticated) render();
+        }
+      },
+      (err) => {
+        console.error('[Firestore] Groups listener error:', err.code, err.message);
+        showToast('Eroare la sincronizarea grupelor: ' + window.fbErrorMessage(err), 'error');
+      }
+    );
+
+    // Listen to courses collection (catalog of preset courses)
+    if (unsubscribeCourses) unsubscribeCourses();
+    unsubscribeCourses = onSnapshot(
+      collection(db, 'courses'),
+      (snap) => {
+        const courses = [];
+        snap.forEach(docSnap => {
+          courses.push({ id: docSnap.id, ...docSnap.data() });
+        });
+        console.log('[Firestore] Courses sync:', courses.length, 'courses');
+        if (state.data) {
+          state.data.courses = courses;
+          if (state.isAuthenticated) render();
+        }
+      },
+      (err) => {
+        // Non-critical - courses are optional
+        console.warn('[Firestore] Courses listener error:', err.code, err.message);
+      }
+    );
+  };
+
+  const _origStopListeners = window.stopFirestoreListeners;
+  window.stopFirestoreListeners = function() {
+    _origStopListeners();
+    if (unsubscribeGroups) { unsubscribeGroups(); unsubscribeGroups = null; }
+    if (unsubscribeCourses) { unsubscribeCourses(); unsubscribeCourses = null; }
+  };
+
+  // Helper to auto-generate group name from data
+  function autoGroupName(data) {
+    if (!data) return 'Grupă';
+    const dayNames = ['Luni', 'Marți', 'Miercuri', 'Joi', 'Vineri', 'Sâmbătă', 'Duminică'];
+    const dayIdx = data.dayOfWeek !== undefined ? data.dayOfWeek : data.day;
+    const dayName = (dayIdx !== undefined && dayIdx !== null) ? dayNames[dayIdx] : '';
+    return `${dayName} ${data.time || ''} (${data.duration || 60}min)`.trim();
+  }
+
+  window.firestoreCreateGroup = async function(groupData) {
+    try {
+      const me = window.fbAuth.currentUser;
+      const docRef = await addDoc(collection(db, 'groups'), {
+        ...groupData,
+        active: true,
+        createdAt: serverTimestamp(),
+        createdBy: me ? me.uid : null,
+        updatedAt: serverTimestamp(),
+      });
+      return { success: true, id: docRef.id };
+    } catch (err) {
+      console.error('Create group error:', err);
+      return { success: false, error: window.fbErrorMessage(err) };
+    }
+  };
+
+  window.firestoreUpdateGroup = async function(groupId, updates) {
+    try {
+      await updateDoc(doc(db, 'groups', groupId), {
+        ...updates,
+        updatedAt: serverTimestamp(),
+      });
+      return { success: true };
+    } catch (err) {
+      console.error('Update group error:', err);
+      return { success: false, error: window.fbErrorMessage(err) };
+    }
+  };
+
+  window.firestoreDeleteGroup = async function(groupId) {
+    try {
+      await deleteDoc(doc(db, 'groups', groupId));
+      return { success: true };
+    } catch (err) {
+      console.error('Delete group error:', err);
+      return { success: false, error: window.fbErrorMessage(err) };
+    }
+  };
+
+  // Generate 18 standard groups for a single club
+  window.firestoreSeedGroupsForClub = async function(clubId) {
+    try {
+      const me = window.fbAuth.currentUser;
+      const slots = [];
+      // Mon-Fri (day 0-4): 15:00/60, 16:00/90, 18:00/90
+      for (let day = 0; day <= 4; day++) {
+        slots.push({ dayOfWeek: day, time: '15:00', duration: 60 });
+        slots.push({ dayOfWeek: day, time: '16:00', duration: 90 });
+        slots.push({ dayOfWeek: day, time: '18:00', duration: 90 });
+      }
+      // Saturday (day 5): 10:00/60, 12:00/60, 14:00/90
+      slots.push({ dayOfWeek: 5, time: '10:00', duration: 60 });
+      slots.push({ dayOfWeek: 5, time: '12:00', duration: 60 });
+      slots.push({ dayOfWeek: 5, time: '14:00', duration: 90 });
+
+      const batch = writeBatch(db);
+      slots.forEach(s => {
+        const ref = doc(collection(db, 'groups'));
+        batch.set(ref, {
+          clubId,
+          dayOfWeek: s.dayOfWeek,
+          time: s.time,
+          duration: s.duration,
+          capacity: 6,
+          teacherId: null,
+          course: '',          // empty — to be filled in
+          ageRange: '',        // empty — to be filled in
+          name: '',            // empty → uses autoGroupName fallback
+          studentIds: [],
+          status: 'incomplete', // 'incomplete' | 'configured'
+          active: true,
+          createdAt: serverTimestamp(),
+          createdBy: me ? me.uid : null,
+          updatedAt: serverTimestamp(),
+        });
+      });
+      await batch.commit();
+      return { success: true, count: slots.length };
+    } catch (err) {
+      console.error('Seed groups error:', err);
+      return { success: false, error: window.fbErrorMessage(err) };
+    }
+  };
+
+  // Generate groups for ALL clubs that don't have any groups yet
+  window.firestoreSeedAllGroups = async function() {
+    try {
+      // Get all clubs
+      const clubsSnap = await getDocs(collection(db, 'clubs'));
+      const clubIds = [];
+      clubsSnap.forEach(d => clubIds.push(d.id));
+
+      if (clubIds.length === 0) {
+        return { success: false, error: 'Nu există cluburi. Inițializează întâi cluburile.' };
+      }
+
+      // Get existing groups, count per club
+      const groupsSnap = await getDocs(collection(db, 'groups'));
+      const groupCountByClub = {};
+      groupsSnap.forEach(d => {
+        const cid = d.data().clubId;
+        groupCountByClub[cid] = (groupCountByClub[cid] || 0) + 1;
+      });
+
+      let totalCreated = 0;
+      let clubsProcessed = 0;
+      for (const clubId of clubIds) {
+        if ((groupCountByClub[clubId] || 0) >= 18) {
+          continue; // Already has groups
+        }
+        const result = await window.firestoreSeedGroupsForClub(clubId);
+        if (result.success) {
+          totalCreated += result.count;
+          clubsProcessed++;
+        }
+      }
+      return { success: true, count: totalCreated, clubsProcessed };
+    } catch (err) {
+      console.error('Seed all groups error:', err);
+      return { success: false, error: window.fbErrorMessage(err) };
+    }
+  };
+
+  // ============================================================================
+  // FIRESTORE CRUD: COURSES (preset catalog)
+  // ============================================================================
+
+  window.firestoreCreateCourse = async function(name) {
+    try {
+      const me = window.fbAuth.currentUser;
+      const docRef = await addDoc(collection(db, 'courses'), {
+        name: name.trim(),
+        createdAt: serverTimestamp(),
+        createdBy: me ? me.uid : null,
+      });
+      return { success: true, id: docRef.id };
+    } catch (err) {
+      console.error('Create course error:', err);
+      return { success: false, error: window.fbErrorMessage(err) };
+    }
+  };
+
+  window.firestoreDeleteCourse = async function(courseId) {
+    try {
+      await deleteDoc(doc(db, 'courses', courseId));
+      return { success: true };
+    } catch (err) {
       return { success: false, error: window.fbErrorMessage(err) };
     }
   };
