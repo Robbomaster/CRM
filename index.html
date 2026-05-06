@@ -1570,6 +1570,12 @@
     transition: all 0.12s;
   }
   .lead-card:hover { border-color: var(--border-strong); }
+  .lead-card.dragging { opacity: 0.4; transform: scale(0.95); }
+  .kanban-col-drop {
+    background: rgba(255, 204, 31, 0.12) !important;
+    outline: 2px dashed var(--primary);
+    outline-offset: -4px;
+  }
   .lead-card-source {
     font-size: 10.5px;
     text-transform: uppercase;
@@ -2185,9 +2191,12 @@ function leadStatusBadge(status) {
   const map = {
     'new': { c: 'badge-info', t: 'Lead nou' },
     'contacted': { c: 'badge-purple', t: 'Contactat' },
-    'trial-scheduled': { c: 'badge-yellow', t: 'Programat probă' },
+    'interested': { c: 'badge-blue', t: 'Interesat' },
+    'trial-scheduled': { c: 'badge-yellow', t: 'Probă programată' },
     'trial-done': { c: 'badge-warning', t: 'Probă realizată' },
-    'enrolled': { c: 'badge-success', t: 'Înscris' },
+    'converted': { c: 'badge-success', t: 'Înscris ✓' },
+    'enrolled': { c: 'badge-success', t: 'Înscris ✓' },
+    'lost': { c: 'badge-danger', t: 'Pierdut' },
     'refused': { c: 'badge-danger', t: 'Refuzat' },
     'unreachable': { c: 'badge-neutral', t: 'Necontactabil' },
   };
@@ -2196,8 +2205,19 @@ function leadStatusBadge(status) {
 }
 
 function leadSourceLabel(source, detail) {
-  const map = { 'site': 'Formular site', 'recommendation': 'Recomandare', 'event': 'Eveniment' };
-  let label = map[source] || source;
+  const map = {
+    'facebook': 'Facebook',
+    'instagram': 'Instagram',
+    'referral': 'Recomandare',
+    'website': 'Site web',
+    'site': 'Site web',
+    'phone': 'Apel direct',
+    'google': 'Google',
+    'event': 'Eveniment',
+    'recommendation': 'Recomandare',
+    'other': 'Altă sursă',
+  };
+  let label = map[source] || source || '—';
   if (detail) label += ` — ${detail}`;
   return label;
 }
@@ -5892,13 +5912,20 @@ function renderMyStudents(el) {
 // LEADS PAGE
 // ==========================================================================
 let leadsView = 'kanban'; // 'kanban' or 'table'
-let leadsFilter = { status: 'all', source: 'all', clubId: 'all' };
+let leadsFilter = { status: 'all', source: 'all', clubId: 'all', assignedTo: 'all' };
 
 function renderLeads(el) {
   let leads = [...state.data.leads];
   if (leadsFilter.status !== 'all') leads = leads.filter(l => l.status === leadsFilter.status);
   if (leadsFilter.source !== 'all') leads = leads.filter(l => l.source === leadsFilter.source);
-  if (leadsFilter.clubId !== 'all') leads = leads.filter(l => l.preferredClub === leadsFilter.clubId);
+  if (leadsFilter.clubId !== 'all') leads = leads.filter(l => (l.preferredClubId || l.preferredClub) === leadsFilter.clubId);
+  if (leadsFilter.assignedTo !== 'all') {
+    if (leadsFilter.assignedTo === 'unassigned') {
+      leads = leads.filter(l => !l.assignedTo);
+    } else {
+      leads = leads.filter(l => l.assignedTo === leadsFilter.assignedTo);
+    }
+  }
 
   el.innerHTML = `
     <div class="page-header">
@@ -5911,7 +5938,7 @@ function renderLeads(el) {
           <button class="btn btn-sm ${leadsView === 'kanban' ? 'btn-primary' : 'btn-ghost'}" onclick="leadsView='kanban'; render();">Kanban</button>
           <button class="btn btn-sm ${leadsView === 'table' ? 'btn-primary' : 'btn-ghost'}" onclick="leadsView='table'; render();">Listă</button>
         </div>
-        <button class="btn btn-primary" onclick="openLeadModal()">${ICONS.plus} Lead manual</button>
+        <button class="btn btn-primary" onclick="openLeadModal()">${ICONS.plus} Lead nou</button>
       </div>
     </div>
 
@@ -5920,21 +5947,32 @@ function renderLeads(el) {
         <option value="all">Toate statusurile</option>
         <option value="new" ${leadsFilter.status === 'new' ? 'selected' : ''}>Lead nou</option>
         <option value="contacted" ${leadsFilter.status === 'contacted' ? 'selected' : ''}>Contactat</option>
-        <option value="trial-scheduled" ${leadsFilter.status === 'trial-scheduled' ? 'selected' : ''}>Programat probă</option>
+        <option value="interested" ${leadsFilter.status === 'interested' ? 'selected' : ''}>Interesat</option>
+        <option value="trial-scheduled" ${leadsFilter.status === 'trial-scheduled' ? 'selected' : ''}>Probă programată</option>
         <option value="trial-done" ${leadsFilter.status === 'trial-done' ? 'selected' : ''}>Probă realizată</option>
-        <option value="enrolled" ${leadsFilter.status === 'enrolled' ? 'selected' : ''}>Înscris</option>
-        <option value="refused" ${leadsFilter.status === 'refused' ? 'selected' : ''}>Refuzat</option>
+        <option value="converted" ${leadsFilter.status === 'converted' ? 'selected' : ''}>Înscris</option>
+        <option value="lost" ${leadsFilter.status === 'lost' ? 'selected' : ''}>Pierdut</option>
         <option value="unreachable" ${leadsFilter.status === 'unreachable' ? 'selected' : ''}>Necontactabil</option>
       </select>
       <select onchange="leadsFilter.source = this.value; render();">
         <option value="all">Toate sursele</option>
-        <option value="site" ${leadsFilter.source === 'site' ? 'selected' : ''}>Formular site</option>
-        <option value="recommendation" ${leadsFilter.source === 'recommendation' ? 'selected' : ''}>Recomandare</option>
+        <option value="facebook" ${leadsFilter.source === 'facebook' ? 'selected' : ''}>Facebook</option>
+        <option value="instagram" ${leadsFilter.source === 'instagram' ? 'selected' : ''}>Instagram</option>
+        <option value="referral" ${leadsFilter.source === 'referral' ? 'selected' : ''}>Recomandare</option>
+        <option value="website" ${leadsFilter.source === 'website' ? 'selected' : ''}>Site web</option>
+        <option value="phone" ${leadsFilter.source === 'phone' ? 'selected' : ''}>Apel direct</option>
+        <option value="google" ${leadsFilter.source === 'google' ? 'selected' : ''}>Google</option>
         <option value="event" ${leadsFilter.source === 'event' ? 'selected' : ''}>Eveniment</option>
+        <option value="other" ${leadsFilter.source === 'other' ? 'selected' : ''}>Altă sursă</option>
       </select>
       <select onchange="leadsFilter.clubId = this.value; render();">
         <option value="all">Toate cluburile</option>
-        ${state.data.clubs.map(c => `<option value="${c.id}" ${leadsFilter.clubId === c.id ? 'selected' : ''}>${c.name}</option>`).join('')}
+        ${state.data.clubs.map(c => `<option value="${c.id}" ${leadsFilter.clubId === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}
+      </select>
+      <select onchange="leadsFilter.assignedTo = this.value; render();">
+        <option value="all">Toți responsabilii</option>
+        <option value="unassigned" ${leadsFilter.assignedTo === 'unassigned' ? 'selected' : ''}>Neasignați</option>
+        ${state.data.users.filter(u => u.role === 'admin' || u.role === 'manager').map(u => `<option value="${u.id}" ${leadsFilter.assignedTo === u.id ? 'selected' : ''}>${escapeHtml(u.name)}</option>`).join('')}
       </select>
     </div>
 
@@ -5944,29 +5982,32 @@ function renderLeads(el) {
 
 function renderLeadsKanban(leads) {
   const cols = [
-    { id: 'new', title: 'Lead nou' },
-    { id: 'contacted', title: 'Contactat' },
-    { id: 'trial-scheduled', title: 'Programat probă' },
-    { id: 'trial-done', title: 'Probă realizată' },
-    { id: 'enrolled', title: 'Înscris' },
+    { id: 'new', title: 'Lead nou', color: 'var(--primary)' },
+    { id: 'contacted', title: 'Contactat', color: 'var(--info)' },
+    { id: 'interested', title: 'Interesat', color: 'var(--info)' },
+    { id: 'trial-scheduled', title: 'Probă programată', color: 'var(--warning)' },
+    { id: 'trial-done', title: 'Probă realizată', color: 'var(--warning)' },
+    { id: 'converted', title: 'Înscris ✓', color: 'var(--success)' },
+    { id: 'lost', title: 'Pierdut', color: 'var(--danger)' },
   ];
   return `
     <div class="kanban">
       ${cols.map(col => {
         const colLeads = leads.filter(l => l.status === col.id);
         return `
-          <div class="kanban-col">
-            <div class="kanban-col-header">
+          <div class="kanban-col" ondragover="event.preventDefault(); this.classList.add('kanban-col-drop');" ondragleave="this.classList.remove('kanban-col-drop');" ondrop="handleLeadDrop(event, '${col.id}'); this.classList.remove('kanban-col-drop');">
+            <div class="kanban-col-header" style="border-top:3px solid ${col.color};">
               <div class="kanban-col-title">${col.title}</div>
               <div class="kanban-col-count">${colLeads.length}</div>
             </div>
             <div class="kanban-cards">
               ${colLeads.map(l => `
-                <div class="lead-card" onclick="navigateTo('lead-detail', { leadId: '${l.id}' })">
+                <div class="lead-card" draggable="true" ondragstart="event.dataTransfer.setData('text/plain', '${l.id}'); this.classList.add('dragging');" ondragend="this.classList.remove('dragging');" onclick="navigateTo('lead-detail', { leadId: '${l.id}' })">
                   <div class="lead-card-source">${leadSourceLabel(l.source, l.sourceDetail)}</div>
-                  <div class="lead-card-name">${l.childName} <span style="color:var(--text-dim); font-weight:500; font-size:11.5px;">${l.age} ani</span></div>
-                  <div class="lead-card-meta">${l.parentName}</div>
-                  <div class="lead-card-meta font-mono fs-xs">${l.phone}</div>
+                  <div class="lead-card-name">${escapeHtml(l.childName || '')} ${l.age ? `<span style="color:var(--text-dim); font-weight:500; font-size:11.5px;">${l.age} ani</span>` : ''}</div>
+                  <div class="lead-card-meta">${escapeHtml(l.parentName || '')}</div>
+                  <div class="lead-card-meta font-mono fs-xs">${escapeHtml(l.phone || '')}</div>
+                  ${l.assignedTo ? `<div class="lead-card-meta fs-xs" style="color:var(--primary);">${ICONS.user} ${escapeHtml((getUser(l.assignedTo) || {}).name || '')}</div>` : ''}
                   <div class="lead-card-time mt-2">${ICONS.clock} ${timeAgo(l.createdAt)}</div>
                 </div>
               `).join('') || `<div class="text-dim fs-xs" style="padding:20px; text-align:center;">Niciun lead</div>`}
@@ -5977,6 +6018,16 @@ function renderLeadsKanban(leads) {
     </div>
   `;
 }
+
+async function handleLeadDrop(event, newStatus) {
+  event.preventDefault();
+  const leadId = event.dataTransfer.getData('text/plain');
+  if (!leadId) return;
+  const lead = getLead(leadId);
+  if (!lead || lead.status === newStatus) return;
+  await changeLeadStatus(leadId, newStatus);
+}
+window.handleLeadDrop = handleLeadDrop;
 
 function renderLeadsTable(leads) {
   return `
@@ -6021,71 +6072,239 @@ function renderLeadsTable(leads) {
 
 function openLeadModal(id) {
   const l = id ? getLead(id) : null;
-  openModal(l ? 'Editează lead' : 'Lead manual', `
+  const teamMembers = state.data.users.filter(u => u.role === 'admin' || u.role === 'manager');
+
+  openModal(l ? 'Editează lead' : 'Lead nou', `
+    <!-- DATELE COPILULUI -->
+    <div class="card-title" style="margin-bottom:10px; padding-bottom:6px; border-bottom:1px solid var(--border); font-size:13px; color:var(--text-soft); text-transform:uppercase; letter-spacing:0.4px;">Date copil (potențial înscris)</div>
+
     <div class="form-row">
       <div class="form-group">
-        <label class="label-required">Nume copil</label>
-        <input id="lead-childname" type="text" value="${l ? l.childName : ''}">
+        <label class="label-required">Prenume copil</label>
+        <input id="lead-child-firstname" type="text" value="${l ? escapeHtml(l.childFirstName || '') : ''}" placeholder="ex. Andrei">
       </div>
+      <div class="form-group">
+        <label>Nume copil</label>
+        <input id="lead-child-lastname" type="text" value="${l ? escapeHtml(l.childLastName || '') : ''}" placeholder="opțional">
+      </div>
+    </div>
+    <div class="form-row">
       <div class="form-group">
         <label>Vârstă</label>
-        <input id="lead-age" type="number" min="3" max="18" value="${l ? l.age : ''}">
+        <input id="lead-child-age" type="number" min="3" max="18" value="${l ? (l.childAge || '') : ''}" placeholder="ex. 8">
+      </div>
+      <div class="form-group">
+        <label>Data nașterii (opțional)</label>
+        <input id="lead-child-birthdate" type="date" value="${l ? (l.childBirthDate || '') : ''}">
+      </div>
+    </div>
+
+    <!-- DATELE PĂRINTELUI -->
+    <div class="card-title" style="margin-top:18px; margin-bottom:10px; padding-bottom:6px; border-bottom:1px solid var(--border); font-size:13px; color:var(--text-soft); text-transform:uppercase; letter-spacing:0.4px;">Contact (părinte/tutore)</div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="label-required">Prenume părinte</label>
+        <input id="lead-parent-firstname" type="text" value="${l ? escapeHtml(l.parentFirstName || '') : ''}" placeholder="ex. Maria">
+      </div>
+      <div class="form-group">
+        <label>Nume părinte</label>
+        <input id="lead-parent-lastname" type="text" value="${l ? escapeHtml(l.parentLastName || '') : ''}" placeholder="opțional">
       </div>
     </div>
     <div class="form-row">
-      <div class="form-group">
-        <label class="label-required">Nume părinte</label>
-        <input id="lead-parentname" type="text" value="${l ? l.parentName : ''}">
-      </div>
       <div class="form-group">
         <label class="label-required">Telefon</label>
-        <input id="lead-phone" type="tel" value="${l ? l.phone : ''}">
+        <input id="lead-parent-phone" type="tel" value="${l ? escapeHtml(l.parentPhone || '') : ''}" placeholder="+40 7XX XXX XXX">
+      </div>
+      <div class="form-group">
+        <label>Email</label>
+        <input id="lead-parent-email" type="email" value="${l ? escapeHtml(l.parentEmail || '') : ''}" placeholder="opțional">
       </div>
     </div>
+
+    <!-- CONTEXT LEAD -->
+    <div class="card-title" style="margin-top:18px; margin-bottom:10px; padding-bottom:6px; border-bottom:1px solid var(--border); font-size:13px; color:var(--text-soft); text-transform:uppercase; letter-spacing:0.4px;">Detalii lead</div>
+
     <div class="form-row">
       <div class="form-group">
-        <label class="label-required">Sursă</label>
+        <label class="label-required">Sursa</label>
         <select id="lead-source">
-          <option value="site" ${l && l.source === 'site' ? 'selected' : ''}>Formular site</option>
-          <option value="recommendation" ${l && l.source === 'recommendation' ? 'selected' : ''}>Recomandare</option>
-          <option value="event" ${l && l.source === 'event' ? 'selected' : ''}>Eveniment</option>
+          <option value="facebook" ${l && l.source === 'facebook' ? 'selected' : ''}>Facebook</option>
+          <option value="instagram" ${l && l.source === 'instagram' ? 'selected' : ''}>Instagram</option>
+          <option value="referral" ${l && l.source === 'referral' ? 'selected' : ''}>Recomandare</option>
+          <option value="website" ${l && l.source === 'website' ? 'selected' : ''}>Site web (formular)</option>
+          <option value="phone" ${l && l.source === 'phone' ? 'selected' : ''}>Apel telefonic direct</option>
+          <option value="google" ${l && l.source === 'google' ? 'selected' : ''}>Google</option>
+          <option value="event" ${l && l.source === 'event' ? 'selected' : ''}>Eveniment / open day</option>
+          <option value="other" ${l && l.source === 'other' ? 'selected' : ''}>Altă sursă</option>
         </select>
       </div>
+      <div class="form-group">
+        <label>Detaliu sursă</label>
+        <input id="lead-source-detail" type="text" value="${l ? escapeHtml(l.sourceDetail || '') : ''}" placeholder="ex. recomandare de la familia Vasilescu">
+      </div>
+    </div>
+
+    <div class="form-row">
       <div class="form-group">
         <label>Club preferat</label>
         <select id="lead-club">
-          ${state.data.clubs.map(c => `<option value="${c.id}" ${l && l.preferredClub === c.id ? 'selected' : ''}>${c.name}</option>`).join('')}
+          <option value="">— Indecis —</option>
+          ${state.data.clubs.map(c => `<option value="${c.id}" ${l && l.preferredClubId === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}
         </select>
       </div>
+      <div class="form-group">
+        <label>Curs preferat</label>
+        <input id="lead-preferred-course" type="text" value="${l ? escapeHtml(l.preferredCourse || '') : ''}" placeholder="ex. Robotică, AI Kids">
+      </div>
     </div>
+
     <div class="form-group">
-      <label>Mesaj / detalii</label>
-      <textarea id="lead-message" placeholder="ex. Doresc oră de probă pentru robotică...">${l ? (l.message || '') : ''}</textarea>
+      <label>Asignează către</label>
+      <select id="lead-assigned-to">
+        <option value="">— Neasignat (toată echipa) —</option>
+        ${teamMembers.map(u => `<option value="${u.id}" ${l && l.assignedTo === u.id ? 'selected' : ''}>${escapeHtml(u.name)} (${u.role})</option>`).join('')}
+      </select>
     </div>
+
+    <div class="form-group">
+      <label>Note inițiale</label>
+      <textarea id="lead-notes" rows="3" placeholder="ex. Doresc oră de probă pentru robotică, copilul are 8 ani, mama are nevoie de program după 16:00...">${l ? escapeHtml(l.notes || '') : ''}</textarea>
+    </div>
+
+    <div id="lead-modal-error" style="display:none;" class="login-error mt-2"></div>
   `, `
     <button class="btn" onclick="closeModal()">Anulează</button>
-    <button class="btn btn-primary" onclick="saveLead('${id || ''}')">Salvează</button>
+    <button class="btn btn-primary" id="lead-save-btn" onclick="saveLead('${id || ''}')">${l ? 'Salvează' : 'Adaugă lead'}</button>
   `, 'lg');
 }
 
-function saveLead(id) {
+async function saveLead(id) {
+  const errEl = document.getElementById('lead-modal-error');
+  const btn = document.getElementById('lead-save-btn');
+  errEl.style.display = 'none';
+
   const data = {
-    childName: document.getElementById('lead-childname').value.trim(),
-    age: parseInt(document.getElementById('lead-age').value) || null,
-    parentName: document.getElementById('lead-parentname').value.trim(),
-    phone: document.getElementById('lead-phone').value.trim(),
+    childFirstName: document.getElementById('lead-child-firstname').value.trim(),
+    childLastName: document.getElementById('lead-child-lastname').value.trim(),
+    childAge: parseInt(document.getElementById('lead-child-age').value) || null,
+    childBirthDate: document.getElementById('lead-child-birthdate').value || '',
+    parentFirstName: document.getElementById('lead-parent-firstname').value.trim(),
+    parentLastName: document.getElementById('lead-parent-lastname').value.trim(),
+    parentPhone: document.getElementById('lead-parent-phone').value.trim(),
+    parentEmail: document.getElementById('lead-parent-email').value.trim(),
     source: document.getElementById('lead-source').value,
-    preferredClub: document.getElementById('lead-club').value,
-    message: document.getElementById('lead-message').value.trim(),
+    sourceDetail: document.getElementById('lead-source-detail').value.trim(),
+    preferredClubId: document.getElementById('lead-club').value || null,
+    preferredCourse: document.getElementById('lead-preferred-course').value.trim(),
+    assignedTo: document.getElementById('lead-assigned-to').value || null,
+    notes: document.getElementById('lead-notes').value.trim(),
   };
-  if (!data.childName || !data.parentName || !data.phone) { showToast('Completează câmpurile obligatorii', 'error'); return; }
-  if (id) Object.assign(getLead(id), data);
-  else state.data.leads.unshift({ id: 'l' + Date.now(), ...data, status: 'new', createdAt: new Date().toISOString(), assignedTo: null });
-  computeAlerts();
+
+  if (!data.childFirstName) {
+    errEl.textContent = 'Prenumele copilului este obligatoriu';
+    errEl.style.display = ''; return;
+  }
+  if (!data.parentFirstName) {
+    errEl.textContent = 'Prenumele părintelui este obligatoriu';
+    errEl.style.display = ''; return;
+  }
+  if (!data.parentPhone) {
+    errEl.textContent = 'Telefonul părintelui este obligatoriu';
+    errEl.style.display = ''; return;
+  }
+  if (!window.firebaseReady) {
+    errEl.textContent = 'Firebase încă se încarcă...';
+    errEl.style.display = ''; return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Se salvează...';
+
+  let result;
+  if (id) {
+    result = await window.firestoreUpdateLead(id, data);
+  } else {
+    // New leads start as 'new'
+    data.status = 'new';
+    result = await window.firestoreCreateLead(data);
+  }
+
+  btn.disabled = false;
+  if (!result.success) {
+    errEl.textContent = result.error;
+    errEl.style.display = '';
+    btn.textContent = id ? 'Salvează' : 'Adaugă lead';
+    return;
+  }
   closeModal();
-  showToast('Lead salvat', 'success');
-  render();
+  showToast(id ? 'Lead actualizat' : 'Lead adăugat cu succes', 'success');
 }
+
+async function deleteLead(id) {
+  const l = getLead(id);
+  if (!l) return;
+  openModal('Șterge lead', `
+    <div style="text-align:center; padding: 8px 0;">
+      <div style="font-size:42px; margin-bottom:12px;">⚠️</div>
+      <div style="font-size:15px; color:var(--text); margin-bottom:6px; font-weight:600;">Sigur ștergi acest lead?</div>
+      <div style="font-size:13px; color:var(--text-soft);">${escapeHtml(l.childName || '')} — ${escapeHtml(l.parentName || '')}</div>
+    </div>
+  `, `
+    <button class="btn" onclick="closeModal()">Anulează</button>
+    <button class="btn btn-primary" onclick="confirmDeleteLead('${id}')" style="background:var(--danger); color:white; border-color:var(--danger);">Șterge definitiv</button>
+  `);
+}
+
+async function confirmDeleteLead(id) {
+  closeModal();
+  if (!window.firebaseReady) return;
+  const result = await window.firestoreDeleteLead(id);
+  if (!result.success) {
+    showToast('Eroare: ' + result.error, 'error');
+    return;
+  }
+  showToast('Lead șters', 'success');
+}
+
+// Quick status change (for kanban or buttons)
+async function changeLeadStatus(leadId, newStatus) {
+  if (!window.firebaseReady) return;
+  const updates = { status: newStatus };
+  if (newStatus === 'lost') {
+    // Could prompt for reason later
+  }
+  const result = await window.firestoreUpdateLead(leadId, updates);
+  if (!result.success) {
+    showToast('Eroare: ' + result.error, 'error');
+    return;
+  }
+  // Add timeline event
+  try {
+    await window.firestoreAddLeadEvent(leadId, {
+      type: 'status-change',
+      newStatus,
+      description: 'Status schimbat în: ' + leadStatusLabel(newStatus),
+    });
+  } catch(e) { /* non-critical */ }
+  showToast('Status actualizat', 'success');
+}
+
+function leadStatusLabel(status) {
+  const map = {
+    'new': 'Lead nou',
+    'contacted': 'Contactat',
+    'interested': 'Interesat',
+    'trial-scheduled': 'Probă programată',
+    'trial-done': 'Probă realizată',
+    'converted': 'Înscris',
+    'lost': 'Pierdut',
+    'unreachable': 'Necontactabil',
+  };
+  return map[status] || status;
+}
+window.leadStatusLabel = leadStatusLabel;
 
 // ==========================================================================
 // LEAD DETAIL
@@ -6114,7 +6333,8 @@ function renderLeadDetail(el) {
       </div>
       <div class="page-actions">
         <button class="btn" onclick="openLeadModal('${l.id}')">${ICONS.edit} Editează</button>
-        ${l.status !== 'enrolled' ? `<button class="btn btn-primary" onclick="openConvertLeadModal('${l.id}')">${ICONS.check} Convertește în copil</button>` : ''}
+        ${(l.status !== 'converted' && l.status !== 'enrolled') ? `<button class="btn btn-primary" onclick="openConvertLeadModal('${l.id}')">${ICONS.check} Convertește în copil</button>` : ''}
+        ${state.currentRole === 'admin' ? `<button class="btn btn-danger-soft" onclick="deleteLead('${l.id}')">${ICONS.trash} Șterge</button>` : ''}
       </div>
     </div>
 
@@ -6312,76 +6532,208 @@ function saveLeadReminder(leadId) {
   render();
 }
 
-function changeLeadStatus(leadId, status) {
-  const l = getLead(leadId);
-  if (l) {
-    l.status = status;
-    showToast(`Status actualizat`, 'success');
-    computeAlerts();
-    render();
-  }
-}
-
 function openConvertLeadModal(leadId) {
   const l = getLead(leadId);
+  if (!l) return;
+
+  // Pre-fill from lead data
+  const childFirst = l.childFirstName || (l.childName || '').split(' ')[0] || '';
+  const childLast = l.childLastName || (l.childName || '').split(' ').slice(1).join(' ') || '';
+  const parentFirst = l.parentFirstName || (l.parentName || '').split(' ')[0] || '';
+  const parentLast = l.parentLastName || (l.parentName || '').split(' ').slice(1).join(' ') || '';
+  const phone = l.parentPhone || l.phone || '';
+  const email = l.parentEmail || '';
+
+  // Visible clubs/groups
+  const visibleClubs = state.currentRole === 'admin' ? state.data.clubs : getMyClubs();
+
   openModal('Convertește lead în copil înscris', `
     <div class="alert-banner success" style="margin-bottom:16px;">
       <div class="alert-banner-icon">✓</div>
       <div class="alert-banner-content">
-        <div class="alert-banner-title">Felicitări! ${l.childName} se înscrie</div>
-        <div class="alert-banner-desc">Va fi creat un nou contact "Copil" și un "Părinte" cu datele lead-ului. Lead-ul va fi marcat ca "Înscris".</div>
+        <div class="alert-banner-title">Felicitări! ${escapeHtml(l.childName)} se înscrie</div>
+        <div class="alert-banner-desc">Vom crea: 1) un copil înscris, 2) un părinte cu datele de contact, 3) marcăm lead-ul ca "Înscris". Verifică datele de mai jos înainte de confirmare.</div>
       </div>
     </div>
+
+    <!-- COPIL -->
+    <div class="card-title" style="margin-bottom:10px; padding-bottom:6px; border-bottom:1px solid var(--border); font-size:13px; color:var(--text-soft); text-transform:uppercase; letter-spacing:0.4px;">Date copil</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="label-required">Prenume</label>
+        <input id="convert-child-firstname" type="text" value="${escapeHtml(childFirst)}">
+      </div>
+      <div class="form-group">
+        <label class="label-required">Nume</label>
+        <input id="convert-child-lastname" type="text" value="${escapeHtml(childLast)}" placeholder="completează dacă lipsește">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Vârstă</label>
+        <input id="convert-child-age" type="number" min="3" max="18" value="${l.childAge || l.age || ''}">
+      </div>
+      <div class="form-group">
+        <label>Data nașterii</label>
+        <input id="convert-child-birthdate" type="date" value="${l.childBirthDate || ''}">
+      </div>
+    </div>
+
+    <!-- GRUPĂ -->
     <div class="form-group">
       <label class="label-required">Atribuie la grupă</label>
       <select id="convert-group">
-        <option value="">Alege grupa</option>
-        ${state.data.clubs.map(c => `
-          <optgroup label="${c.name}">
-            ${getGroupsInClub(c.id).map(g => `<option value="${g.id}">${g.name} — ${DAYS[g.day]} ${g.time}</option>`).join('')}
-          </optgroup>
-        `).join('')}
+        <option value="">— Alege grupa —</option>
+        ${visibleClubs.map(c => {
+          const groups = state.data.groups.filter(g => g.clubId === c.id).sort((a,b) => {
+            const da = a.dayOfWeek !== undefined ? a.dayOfWeek : a.day;
+            const db = b.dayOfWeek !== undefined ? b.dayOfWeek : b.day;
+            if (da !== db) return da - db;
+            return (a.time || '').localeCompare(b.time || '');
+          });
+          if (groups.length === 0) return '';
+          const isPreferred = l.preferredClubId === c.id || l.preferredClub === c.id;
+          return `<optgroup label="${escapeHtml(c.name)}${isPreferred ? ' ⭐ (preferat)' : ''}">
+            ${groups.map(g => {
+              const dayIdx = g.dayOfWeek !== undefined ? g.dayOfWeek : g.day;
+              const enrolled = getStudentsInGroup(g.id).length;
+              const isFull = enrolled >= (g.capacity || 6);
+              return `<option value="${g.id}" ${isFull ? 'disabled' : ''}>${escapeHtml(g.course || '(fără curs)')} — ${DAYS[dayIdx]} ${g.time} (${enrolled}/${g.capacity || 6}${isFull ? ' PLIN' : ''})</option>`;
+            }).join('')}
+          </optgroup>`;
+        }).join('')}
       </select>
     </div>
-    <div class="form-group">
-      <label>Notă internă</label>
-      <textarea id="convert-note" placeholder="ex. A făcut probă pe 7 mai, s-a descurcat foarte bine"></textarea>
+
+    <!-- PĂRINTE -->
+    <div class="card-title" style="margin-top:18px; margin-bottom:10px; padding-bottom:6px; border-bottom:1px solid var(--border); font-size:13px; color:var(--text-soft); text-transform:uppercase; letter-spacing:0.4px;">Date părinte</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="label-required">Prenume părinte</label>
+        <input id="convert-parent-firstname" type="text" value="${escapeHtml(parentFirst)}">
+      </div>
+      <div class="form-group">
+        <label class="label-required">Nume părinte</label>
+        <input id="convert-parent-lastname" type="text" value="${escapeHtml(parentLast)}" placeholder="completează dacă lipsește">
+      </div>
     </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="label-required">Telefon</label>
+        <input id="convert-parent-phone" type="tel" value="${escapeHtml(phone)}">
+      </div>
+      <div class="form-group">
+        <label>Email</label>
+        <input id="convert-parent-email" type="email" value="${escapeHtml(email)}">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Relație</label>
+        <select id="convert-parent-relationship">
+          <option value="mama">Mama</option>
+          <option value="tata">Tata</option>
+          <option value="tutore">Tutore</option>
+          <option value="bunic">Bunic/Bunica</option>
+          <option value="altul">Alt</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Status copil</label>
+        <select id="convert-status">
+          <option value="trial">La probă</option>
+          <option value="active" selected>Activ (înscris)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="label-required">Adresă (domiciliu / facturare)</label>
+      <input id="convert-billing-address" type="text" placeholder="ex. Strada Aurel Vlaicu 54, Iași">
+    </div>
+
+    <div id="convert-error" style="display:none;" class="login-error mt-2"></div>
   `, `
     <button class="btn" onclick="closeModal()">Anulează</button>
-    <button class="btn btn-primary" onclick="convertLead('${leadId}')">Înscrie copil</button>
-  `);
+    <button class="btn btn-primary" id="convert-save-btn" onclick="convertLead('${leadId}')">Înscrie copil</button>
+  `, 'lg');
 }
 
-function convertLead(leadId) {
-  const l = getLead(leadId);
-  const groupId = document.getElementById('convert-group').value;
-  if (!groupId) { showToast('Alege o grupă', 'error'); return; }
-  const note = document.getElementById('convert-note').value;
+async function convertLead(leadId) {
+  const errEl = document.getElementById('convert-error');
+  const btn = document.getElementById('convert-save-btn');
+  errEl.style.display = 'none';
 
-  const newParent = { id: 'p' + Date.now(), name: l.parentName, phone: l.phone, email: '', consentTransactional: true, consentMarketing: false };
-  const [firstName, ...rest] = l.childName.split(' ');
-  const lastName = rest.join(' ') || '—';
-  const newStudent = {
-    id: 's' + Date.now(),
-    firstName, lastName,
-    age: l.age || 8,
-    originSchool: '',
-    status: 'active',
-    groupId,
-    parentId: newParent.id,
-    sessionsLeft: 0, makeupsLeft: 0, debt: 0, totalPaid: 0
-  };
-  state.data.parents.push(newParent);
-  state.data.students.push(newStudent);
-  l.status = 'enrolled';
-  if (note) {
-    state.data.mentions.push({ id: 'm' + Date.now(), contactType: 'student', contactId: newStudent.id, authorId: getCurrentUser().id, content: note, type: 'comportament', createdAt: new Date().toISOString() });
+  const childFirstName = document.getElementById('convert-child-firstname').value.trim();
+  const childLastName = document.getElementById('convert-child-lastname').value.trim();
+  const groupId = document.getElementById('convert-group').value;
+  const parentFirstName = document.getElementById('convert-parent-firstname').value.trim();
+  const parentLastName = document.getElementById('convert-parent-lastname').value.trim();
+  const parentPhone = document.getElementById('convert-parent-phone').value.trim();
+  const billingAddress = document.getElementById('convert-billing-address').value.trim();
+
+  if (!childFirstName || !childLastName) {
+    errEl.textContent = 'Numele și prenumele copilului sunt obligatorii';
+    errEl.style.display = ''; return;
   }
+  if (!groupId) {
+    errEl.textContent = 'Alege o grupă';
+    errEl.style.display = ''; return;
+  }
+  if (!parentFirstName || !parentLastName) {
+    errEl.textContent = 'Numele și prenumele părintelui sunt obligatorii';
+    errEl.style.display = ''; return;
+  }
+  if (!parentPhone) {
+    errEl.textContent = 'Telefonul părintelui este obligatoriu';
+    errEl.style.display = ''; return;
+  }
+  if (!billingAddress) {
+    errEl.textContent = 'Adresa de facturare este obligatorie';
+    errEl.style.display = ''; return;
+  }
+  if (!window.firebaseReady) {
+    errEl.textContent = 'Firebase încă se încarcă...';
+    errEl.style.display = ''; return;
+  }
+
+  // Compute clubId from groupId
+  const group = getGroup(groupId);
+  const clubId = group ? group.clubId : null;
+
+  btn.disabled = true;
+  btn.textContent = 'Se înscrie copilul...';
+
+  const conversionData = {
+    childFirstName,
+    childLastName,
+    age: parseInt(document.getElementById('convert-child-age').value) || null,
+    birthDate: document.getElementById('convert-child-birthdate').value || '',
+    groupId,
+    clubId,
+    status: document.getElementById('convert-status').value,
+    parentFirstName,
+    parentLastName,
+    parentPhone,
+    parentEmail: document.getElementById('convert-parent-email').value.trim(),
+    billingAddress,
+    relationship: document.getElementById('convert-parent-relationship').value,
+  };
+
+  const result = await window.firestoreConvertLead(leadId, conversionData);
+
+  btn.disabled = false;
+  if (!result.success) {
+    errEl.textContent = result.error;
+    errEl.style.display = '';
+    btn.textContent = 'Înscrie copil';
+    return;
+  }
+
   closeModal();
-  showToast(`${l.childName} înscris cu succes!`, 'success');
-  computeAlerts();
-  navigateTo('student-detail', { studentId: newStudent.id });
+  showToast(`${childFirstName} ${childLastName} înscris cu succes!`, 'success');
+  // Navigate to the new student
+  setTimeout(() => navigateTo('student-detail', { studentId: result.studentId }), 500);
 }
 
 // ==========================================================================
@@ -7990,6 +8342,7 @@ document.addEventListener('DOMContentLoaded', init);
   let unsubscribeCoursesRef = null;
   let unsubscribeStudentsRef = null;
   let unsubscribeParentsRef = null;
+  let unsubscribeLeadsRef = null;
 
   function _ageFromBirthDate(birthDate) {
     if (!birthDate) return null;
@@ -8164,6 +8517,42 @@ document.addEventListener('DOMContentLoaded', init);
         showToast('Eroare la sincronizarea părinților: ' + window.fbErrorMessage(err), 'error');
       }
     );
+
+    // --- LEADS ---
+    if (unsubscribeLeadsRef) unsubscribeLeadsRef();
+    unsubscribeLeadsRef = onSnapshot(
+      collection(db, 'leads'),
+      (snap) => {
+        const leads = [];
+        snap.forEach(docSnap => {
+          const data = docSnap.data();
+          // Convert Firestore Timestamp to ISO string for legacy code
+          const createdAt = data.createdAt && data.createdAt.toDate ? data.createdAt.toDate().toISOString() : (data.createdAt || new Date().toISOString());
+          leads.push({
+            id: docSnap.id,
+            ...data,
+            createdAt,
+            // Legacy aliases for old render code
+            childName: ((data.childFirstName || '') + ' ' + (data.childLastName || '')).trim() || data.childName || '(fără nume)',
+            parentName: ((data.parentFirstName || '') + ' ' + (data.parentLastName || '')).trim() || data.parentName || '',
+            phone: data.parentPhone || data.phone || '',
+            preferredClub: data.preferredClubId || data.preferredClub || null,
+            age: data.childAge || data.age || null,
+          });
+        });
+        // Sort newest first
+        leads.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+        console.log('[Firestore] Leads sync:', leads.length, 'leads');
+        if (state.data) {
+          state.data.leads = leads;
+          if (state.isAuthenticated) render();
+        }
+      },
+      (err) => {
+        console.error('[Firestore] Leads listener error:', err.code, err.message);
+        showToast('Eroare la sincronizarea lead-urilor: ' + window.fbErrorMessage(err), 'error');
+      }
+    );
   };
 
   window.stopFirestoreListeners = function() {
@@ -8173,6 +8562,7 @@ document.addEventListener('DOMContentLoaded', init);
     if (unsubscribeCoursesRef) { unsubscribeCoursesRef(); unsubscribeCoursesRef = null; }
     if (unsubscribeStudentsRef) { unsubscribeStudentsRef(); unsubscribeStudentsRef = null; }
     if (unsubscribeParentsRef) { unsubscribeParentsRef(); unsubscribeParentsRef = null; }
+    if (unsubscribeLeadsRef) { unsubscribeLeadsRef(); unsubscribeLeadsRef = null; }
   };
 
   // ============================================================================
@@ -8395,6 +8785,133 @@ document.addEventListener('DOMContentLoaded', init);
   // ============================================================================
   // FIRESTORE CRUD: STUDENTS & PARENTS
   // ============================================================================
+
+  // ----- LEADS CRUD -----
+
+  window.firestoreCreateLead = async function(leadData) {
+    try {
+      const me = window.fbAuth.currentUser;
+      const docRef = await addDoc(collection(db, 'leads'), {
+        ...leadData,
+        active: true,
+        createdAt: serverTimestamp(),
+        createdBy: me ? me.uid : null,
+        updatedAt: serverTimestamp(),
+      });
+      return { success: true, id: docRef.id };
+    } catch (err) {
+      console.error('Create lead error:', err);
+      return { success: false, error: window.fbErrorMessage(err) };
+    }
+  };
+
+  window.firestoreUpdateLead = async function(leadId, updates) {
+    try {
+      await updateDoc(doc(db, 'leads', leadId), {
+        ...updates,
+        updatedAt: serverTimestamp(),
+      });
+      return { success: true };
+    } catch (err) {
+      console.error('Update lead error:', err);
+      return { success: false, error: window.fbErrorMessage(err) };
+    }
+  };
+
+  window.firestoreDeleteLead = async function(leadId) {
+    try {
+      await deleteDoc(doc(db, 'leads', leadId));
+      return { success: true };
+    } catch (err) {
+      console.error('Delete lead error:', err);
+      return { success: false, error: window.fbErrorMessage(err) };
+    }
+  };
+
+  // Add a timeline event to a lead (for status changes, calls, notes)
+  window.firestoreAddLeadEvent = async function(leadId, eventData) {
+    try {
+      const me = window.fbAuth.currentUser;
+      const docRef = await addDoc(collection(db, 'leads', leadId, 'events'), {
+        ...eventData,
+        createdAt: serverTimestamp(),
+        createdBy: me ? me.uid : null,
+      });
+      return { success: true, id: docRef.id };
+    } catch (err) {
+      console.error('Add lead event error:', err);
+      return { success: false, error: window.fbErrorMessage(err) };
+    }
+  };
+
+  // Convert a lead to a real student + parent (atomic batch)
+  window.firestoreConvertLead = async function(leadId, conversionData) {
+    try {
+      const me = window.fbAuth.currentUser;
+      // 1. Create parent
+      const parentResult = await addDoc(collection(db, 'parents'), {
+        firstName: conversionData.parentFirstName,
+        lastName: conversionData.parentLastName,
+        phone: conversionData.parentPhone,
+        email: conversionData.parentEmail || '',
+        billingAddress: conversionData.billingAddress,
+        relationship: conversionData.relationship || 'mama',
+        studentIds: [],
+        createdAt: serverTimestamp(),
+        createdBy: me ? me.uid : null,
+        updatedAt: serverTimestamp(),
+      });
+
+      // 2. Create student
+      const studentResult = await addDoc(collection(db, 'students'), {
+        firstName: conversionData.childFirstName,
+        lastName: conversionData.childLastName,
+        birthDate: conversionData.birthDate || '',
+        age: conversionData.age || null,
+        status: conversionData.status || 'active',
+        groupId: conversionData.groupId || null,
+        clubId: conversionData.clubId || null,
+        originSchool: conversionData.originSchool || '',
+        observations: conversionData.observations || '',
+        parentIds: [parentResult.id],
+        enrollmentDate: new Date().toISOString().slice(0, 10),
+        active: true,
+        createdAt: serverTimestamp(),
+        createdBy: me ? me.uid : null,
+        updatedAt: serverTimestamp(),
+      });
+
+      // 3. Update parent.studentIds
+      await updateDoc(parentResult, {
+        studentIds: [studentResult.id],
+        updatedAt: serverTimestamp(),
+      });
+
+      // 4. Mark lead as converted
+      await updateDoc(doc(db, 'leads', leadId), {
+        status: 'converted',
+        convertedToStudentId: studentResult.id,
+        convertedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      // 5. Add timeline event
+      try {
+        await addDoc(collection(db, 'leads', leadId, 'events'), {
+          type: 'converted',
+          description: 'Lead convertit în copil înscris',
+          studentId: studentResult.id,
+          createdAt: serverTimestamp(),
+          createdBy: me ? me.uid : null,
+        });
+      } catch(e) { /* non-critical */ }
+
+      return { success: true, studentId: studentResult.id, parentId: parentResult.id };
+    } catch (err) {
+      console.error('Convert lead error:', err);
+      return { success: false, error: window.fbErrorMessage(err) };
+    }
+  };
 
   // ----- STUDENTS CRUD -----
 
