@@ -1990,6 +1990,7 @@ function loadData() {
     smsCampaigns: [],
     smsTemplates: [],
     courses: [],
+    leadSources: [],
     settings: {
       adminEmail: 'contact@robbomaster.ro',
       consecutiveAbsenceThreshold: 2,
@@ -2217,7 +2218,14 @@ function leadSourceLabel(source, detail) {
     'recommendation': 'Recomandare',
     'other': 'Altă sursă',
   };
-  let label = map[source] || source || '—';
+  let label;
+  if (source && source.startsWith('custom:')) {
+    const customId = source.substring(7);
+    const custom = (state.data.leadSources || []).find(s => s.id === customId);
+    label = custom ? custom.name : 'Sursă personalizată';
+  } else {
+    label = map[source] || source || '—';
+  }
   if (detail) label += ` — ${detail}`;
   return label;
 }
@@ -5964,6 +5972,7 @@ function renderLeads(el) {
         <option value="google" ${leadsFilter.source === 'google' ? 'selected' : ''}>Google</option>
         <option value="event" ${leadsFilter.source === 'event' ? 'selected' : ''}>Eveniment</option>
         <option value="other" ${leadsFilter.source === 'other' ? 'selected' : ''}>Altă sursă</option>
+        ${(state.data.leadSources || []).map(s => `<option value="custom:${s.id}" ${leadsFilter.source === 'custom:' + s.id ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('')}
       </select>
       <select onchange="leadsFilter.clubId = this.value; render();">
         <option value="all">Toate cluburile</option>
@@ -6130,15 +6139,23 @@ function openLeadModal(id) {
       <div class="form-group">
         <label class="label-required">Sursa</label>
         <select id="lead-source">
-          <option value="facebook" ${l && l.source === 'facebook' ? 'selected' : ''}>Facebook</option>
-          <option value="instagram" ${l && l.source === 'instagram' ? 'selected' : ''}>Instagram</option>
-          <option value="referral" ${l && l.source === 'referral' ? 'selected' : ''}>Recomandare</option>
-          <option value="website" ${l && l.source === 'website' ? 'selected' : ''}>Site web (formular)</option>
-          <option value="phone" ${l && l.source === 'phone' ? 'selected' : ''}>Apel telefonic direct</option>
-          <option value="google" ${l && l.source === 'google' ? 'selected' : ''}>Google</option>
-          <option value="event" ${l && l.source === 'event' ? 'selected' : ''}>Eveniment / open day</option>
-          <option value="other" ${l && l.source === 'other' ? 'selected' : ''}>Altă sursă</option>
+          <optgroup label="Surse predefinite">
+            <option value="facebook" ${l && l.source === 'facebook' ? 'selected' : ''}>Facebook</option>
+            <option value="instagram" ${l && l.source === 'instagram' ? 'selected' : ''}>Instagram</option>
+            <option value="referral" ${l && l.source === 'referral' ? 'selected' : ''}>Recomandare</option>
+            <option value="website" ${l && l.source === 'website' ? 'selected' : ''}>Site web (formular)</option>
+            <option value="phone" ${l && l.source === 'phone' ? 'selected' : ''}>Apel telefonic direct</option>
+            <option value="google" ${l && l.source === 'google' ? 'selected' : ''}>Google</option>
+            <option value="event" ${l && l.source === 'event' ? 'selected' : ''}>Eveniment / open day</option>
+            <option value="other" ${l && l.source === 'other' ? 'selected' : ''}>Altă sursă</option>
+          </optgroup>
+          ${(state.data.leadSources || []).length > 0 ? `
+            <optgroup label="Surse personalizate">
+              ${(state.data.leadSources || []).map(s => `<option value="custom:${s.id}" ${l && l.source === 'custom:' + s.id ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('')}
+            </optgroup>
+          ` : ''}
         </select>
+        ${state.currentRole === 'admin' ? '<div class="text-dim fs-xs mt-1">Admin: poți adăuga surse personalizate din Setări → Surse lead-uri</div>' : ''}
       </div>
       <div class="form-group">
         <label>Detaliu sursă</label>
@@ -7668,6 +7685,7 @@ function renderSettings(el) {
       <button class="tab ${settingsTab === 'thresholds' ? 'active' : ''}" onclick="settingsTab='thresholds'; render();">${ICONS.alertTriangle} Praguri alerte</button>
       <button class="tab ${settingsTab === 'sms' ? 'active' : ''}" onclick="settingsTab='sms'; render();">${ICONS.messageSquare} SMS Gateway</button>
       <button class="tab ${settingsTab === 'holidays' ? 'active' : ''}" onclick="settingsTab='holidays'; render();">${ICONS.calendar} Zile libere <span class="tab-count">${state.data.holidays.length}</span></button>
+      ${isAdmin ? `<button class="tab ${settingsTab === 'lead-sources' ? 'active' : ''}" onclick="settingsTab='lead-sources'; render();">${ICONS.inbox} Surse lead-uri <span class="tab-count">${(state.data.leadSources || []).length}</span></button>` : ''}
     </div>
 
     ${isAdmin && settingsTab === 'init' ? renderInitSettings() : ''}
@@ -7676,7 +7694,132 @@ function renderSettings(el) {
     ${settingsTab === 'thresholds' ? renderThresholdsSettings() : ''}
     ${settingsTab === 'sms' ? renderSMSSettings() : ''}
     ${settingsTab === 'holidays' ? renderHolidaysSettings() : ''}
+    ${isAdmin && settingsTab === 'lead-sources' ? renderLeadSourcesSettings() : ''}
   `;
+}
+
+function renderLeadSourcesSettings() {
+  const sources = state.data.leadSources || [];
+  return `
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">Surse lead-uri personalizate</div>
+        <button class="btn btn-primary btn-sm" onclick="openAddLeadSourceModal()">${ICONS.plus} Adaugă sursă nouă</button>
+      </div>
+      <div class="alert-banner info">
+        <div class="alert-banner-icon">i</div>
+        <div class="alert-banner-content">
+          <div class="alert-banner-title">Despre sursele lead-urilor</div>
+          <div class="alert-banner-desc">
+            Cele 8 surse predefinite (Facebook, Instagram, Recomandare, Site web, Apel direct, Google, Eveniment, Altă sursă) sunt disponibile mereu.
+            Aici poți adăuga surse personalizate specifice afacerii tale (ex. "TikTok", "Influencer X", "Vlogger Y", "Târg Cluj 2026").
+          </div>
+        </div>
+      </div>
+
+      ${sources.length === 0 ? `
+        <div class="empty-state" style="padding:30px;">
+          <div class="empty-state-icon">${ICONS.inbox}</div>
+          <h3>Nicio sursă personalizată</h3>
+          <p>Cele 8 surse predefinite sunt disponibile direct în modal-ul de lead.</p>
+        </div>
+      ` : `
+        <div style="margin-top:14px;">
+          ${sources.map(s => `
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:12px 14px; border:1px solid var(--border); border-radius:8px; margin-bottom:8px;">
+              <div>
+                <div style="font-weight:600; font-size:14px;">${escapeHtml(s.name)}</div>
+                <div style="font-size:12px; color:var(--text-soft);">Folosită de ${state.data.leads.filter(l => l.source === 'custom:' + s.id).length} lead-uri</div>
+              </div>
+              <button class="btn btn-sm btn-danger-soft" onclick="deleteLeadSource('${s.id}', '${escapeHtml(s.name)}')" title="Șterge">${ICONS.trash}</button>
+            </div>
+          `).join('')}
+        </div>
+      `}
+    </div>
+  `;
+}
+
+function openAddLeadSourceModal() {
+  openModal('Adaugă sursă lead nouă', `
+    <div class="form-group">
+      <label class="label-required">Numele sursei</label>
+      <input id="new-source-name" type="text" placeholder="ex. TikTok, Vlogger Cristi, Târg Cluj 2026">
+      <div class="text-dim fs-xs mt-1">Va apărea în lista derulantă din modal-ul de lead.</div>
+    </div>
+    <div id="new-source-error" style="display:none;" class="login-error mt-2"></div>
+  `, `
+    <button class="btn" onclick="closeModal()">Anulează</button>
+    <button class="btn btn-primary" id="new-source-save-btn" onclick="saveNewLeadSource()">Adaugă</button>
+  `, 'sm');
+  setTimeout(() => document.getElementById('new-source-name').focus(), 50);
+}
+
+async function saveNewLeadSource() {
+  const name = document.getElementById('new-source-name').value.trim();
+  const errEl = document.getElementById('new-source-error');
+  const btn = document.getElementById('new-source-save-btn');
+  errEl.style.display = 'none';
+
+  if (!name) {
+    errEl.textContent = 'Numele sursei este obligatoriu';
+    errEl.style.display = ''; return;
+  }
+  // Check for duplicates
+  const exists = (state.data.leadSources || []).some(s => s.name.toLowerCase() === name.toLowerCase());
+  if (exists) {
+    errEl.textContent = 'Există deja o sursă cu acest nume';
+    errEl.style.display = ''; return;
+  }
+  if (!window.firebaseReady) {
+    errEl.textContent = 'Firebase încă se încarcă...';
+    errEl.style.display = ''; return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Se adaugă...';
+
+  const result = await window.firestoreCreateLeadSource(name);
+  btn.disabled = false;
+  if (!result.success) {
+    errEl.textContent = result.error;
+    errEl.style.display = '';
+    btn.textContent = 'Adaugă';
+    return;
+  }
+  closeModal();
+  showToast('Sursă adăugată', 'success');
+}
+
+async function deleteLeadSource(id, name) {
+  const usedBy = state.data.leads.filter(l => l.source === 'custom:' + id).length;
+  openModal('Șterge sursă', `
+    <div style="text-align:center; padding: 8px 0;">
+      <div style="font-size:42px; margin-bottom:12px;">⚠️</div>
+      <div style="font-size:15px; color:var(--text); margin-bottom:6px; font-weight:600;">Sigur ștergi sursa "${escapeHtml(name)}"?</div>
+      ${usedBy > 0 ? `<div class="alert-banner warning" style="margin:14px 0; text-align:left;">
+        <div class="alert-banner-icon">!</div>
+        <div class="alert-banner-content">
+          <div class="alert-banner-title">${usedBy} lead-uri folosesc această sursă</div>
+          <div class="alert-banner-desc">Lead-urile vor rămâne cu referință la o sursă inexistentă (vor afișa "Sursă personalizată"). Le poți edita ulterior.</div>
+        </div>
+      </div>` : '<div style="font-size:13px; color:var(--text-soft);">Nu este folosită de niciun lead.</div>'}
+    </div>
+  `, `
+    <button class="btn" onclick="closeModal()">Anulează</button>
+    <button class="btn btn-primary" onclick="confirmDeleteLeadSource('${id}')" style="background:var(--danger); color:white; border-color:var(--danger);">Șterge</button>
+  `);
+}
+
+async function confirmDeleteLeadSource(id) {
+  closeModal();
+  if (!window.firebaseReady) return;
+  const result = await window.firestoreDeleteLeadSource(id);
+  if (!result.success) {
+    showToast('Eroare: ' + result.error, 'error');
+    return;
+  }
+  showToast('Sursă ștearsă', 'success');
 }
 
 function renderInitSettings() {
@@ -8343,6 +8486,7 @@ document.addEventListener('DOMContentLoaded', init);
   let unsubscribeStudentsRef = null;
   let unsubscribeParentsRef = null;
   let unsubscribeLeadsRef = null;
+  let unsubscribeLeadSourcesRef = null;
 
   function _ageFromBirthDate(birthDate) {
     if (!birthDate) return null;
@@ -8553,6 +8697,23 @@ document.addEventListener('DOMContentLoaded', init);
         showToast('Eroare la sincronizarea lead-urilor: ' + window.fbErrorMessage(err), 'error');
       }
     );
+    // --- LEAD SOURCES (custom catalog) ---
+    if (unsubscribeLeadSourcesRef) unsubscribeLeadSourcesRef();
+    unsubscribeLeadSourcesRef = onSnapshot(
+      collection(db, 'leadSources'),
+      (snap) => {
+        const sources = [];
+        snap.forEach(docSnap => sources.push({ id: docSnap.id, ...docSnap.data() }));
+        console.log('[Firestore] LeadSources sync:', sources.length, 'sources');
+        if (state.data) {
+          state.data.leadSources = sources;
+          if (state.isAuthenticated) render();
+        }
+      },
+      (err) => {
+        console.warn('[Firestore] LeadSources listener error:', err.code, err.message);
+      }
+    );
   };
 
   window.stopFirestoreListeners = function() {
@@ -8563,6 +8724,7 @@ document.addEventListener('DOMContentLoaded', init);
     if (unsubscribeStudentsRef) { unsubscribeStudentsRef(); unsubscribeStudentsRef = null; }
     if (unsubscribeParentsRef) { unsubscribeParentsRef(); unsubscribeParentsRef = null; }
     if (unsubscribeLeadsRef) { unsubscribeLeadsRef(); unsubscribeLeadsRef = null; }
+    if (unsubscribeLeadSourcesRef) { unsubscribeLeadSourcesRef(); unsubscribeLeadSourcesRef = null; }
   };
 
   // ============================================================================
@@ -8776,6 +8938,34 @@ document.addEventListener('DOMContentLoaded', init);
   window.firestoreDeleteCourse = async function(courseId) {
     try {
       await deleteDoc(doc(db, 'courses', courseId));
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: window.fbErrorMessage(err) };
+    }
+  };
+
+  // ============================================================================
+  // FIRESTORE CRUD: LEAD SOURCES (admin-customizable)
+  // ============================================================================
+
+  window.firestoreCreateLeadSource = async function(name) {
+    try {
+      const me = window.fbAuth.currentUser;
+      const docRef = await addDoc(collection(db, 'leadSources'), {
+        name: name.trim(),
+        createdAt: serverTimestamp(),
+        createdBy: me ? me.uid : null,
+      });
+      return { success: true, id: docRef.id };
+    } catch (err) {
+      console.error('Create lead source error:', err);
+      return { success: false, error: window.fbErrorMessage(err) };
+    }
+  };
+
+  window.firestoreDeleteLeadSource = async function(sourceId) {
+    try {
+      await deleteDoc(doc(db, 'leadSources', sourceId));
       return { success: true };
     } catch (err) {
       return { success: false, error: window.fbErrorMessage(err) };
