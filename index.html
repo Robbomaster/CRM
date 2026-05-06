@@ -1980,6 +1980,8 @@ function loadData() {
     leadReminders: [],
     plans: [],
     holidays: [],
+    smsCampaigns: [],
+    smsTemplates: [],
     settings: {
       adminEmail: 'contact@robbomaster.ro',
       consecutiveAbsenceThreshold: 2,
@@ -6945,6 +6947,8 @@ document.addEventListener('DOMContentLoaded', init);
   let unsubscribeUsers = null;
 
   window.startFirestoreListeners = function() {
+    console.log('[Firestore] Starting realtime listeners...');
+
     // Listen to clubs collection (ordered by name)
     if (unsubscribeClubs) unsubscribeClubs();
     unsubscribeClubs = onSnapshot(
@@ -6954,16 +6958,16 @@ document.addEventListener('DOMContentLoaded', init);
         snap.forEach(docSnap => {
           clubs.push({ id: docSnap.id, ...docSnap.data() });
         });
+        console.log('[Firestore] Clubs sync:', clubs.length, 'clubs', clubs.map(c => c.name));
         if (state.data) {
           state.data.clubs = clubs;
-          // Re-render if we're on a page that shows clubs
-          if (state.isAuthenticated && ['dashboard', 'clubs', 'club-detail', 'settings'].includes(state.currentPage)) {
-            render();
-          }
+          // Re-render unconditionally if user is authenticated. The previous
+          // restriction (only specific pages) caused stale data on other pages.
+          if (state.isAuthenticated) render();
         }
       },
       (err) => {
-        console.error('Clubs listener error:', err);
+        console.error('[Firestore] Clubs listener error:', err.code, err.message);
         showToast('Eroare la sincronizarea cluburilor: ' + window.fbErrorMessage(err), 'error');
       }
     );
@@ -6989,15 +6993,15 @@ document.addEventListener('DOMContentLoaded', init);
             mustChangePassword: data.mustChangePassword || false,
           });
         });
+        console.log('[Firestore] Users sync:', users.length, 'users');
         if (state.data) {
           state.data.users = users;
-          if (state.isAuthenticated && ['dashboard', 'teachers', 'settings'].includes(state.currentPage)) {
-            render();
-          }
+          if (state.isAuthenticated) render();
         }
       },
       (err) => {
-        console.error('Users listener error:', err);
+        console.error('[Firestore] Users listener error:', err.code, err.message);
+        showToast('Eroare la sincronizarea utilizatorilor: ' + window.fbErrorMessage(err), 'error');
       }
     );
   };
