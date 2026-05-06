@@ -2119,12 +2119,26 @@ function getStudentsInClub(cid) {
   return state.data.students.filter(s => groupIds.includes(s.groupId));
 }
 function getCurrentUser() {
-  if (state.currentUserId) {
-    return state.data.users.find(u => u.id === state.currentUserId);
+  if (!state.currentUserId) return null;
+  return state.data.users.find(u => u.id === state.currentUserId) || null;
+}
+
+// Returns the array of clubs the current user is allowed to see
+function getMyClubs() {
+  const user = getCurrentUser();
+  if (!user) return [];
+  if (user.role === 'admin') return state.data.clubs;
+  if (user.role === 'manager') {
+    return state.data.clubs.filter(c => c.managerId === user.id);
   }
-  if (state.currentRole === 'admin') return state.data.users.find(u => u.role === 'admin');
-  if (state.currentRole === 'manager') return state.data.users.find(u => u.role === 'manager');
-  return state.data.users.find(u => u.role === 'teacher');
+  if (user.role === 'teacher') {
+    // Teachers see clubs where they have at least one group
+    const myGroupClubIds = new Set(
+      state.data.groups.filter(g => g.teacherId === user.id).map(g => g.clubId)
+    );
+    return state.data.clubs.filter(c => myGroupClubIds.has(c.id));
+  }
+  return [];
 }
 
 function getStudentAttendanceRecords(sid) {
@@ -2963,8 +2977,9 @@ function renderAdminDashboard(el) {
 
 function renderManagerDashboard(el) {
   // Manager sees only their assigned clubs
-  const user = state.data.users.find(u => u.role === 'manager');
-  const myClubs = state.data.clubs.filter(c => user.clubs && user.clubs.includes(c.id));
+  const user = getCurrentUser();
+  if (!user) { el.innerHTML = '<div class="empty-state"><h3>Profil neîncărcat</h3></div>'; return; }
+  const myClubs = getMyClubs();
   const myGroups = myClubs.flatMap(c => getGroupsInClub(c.id));
   const myStudents = myClubs.flatMap(c => getStudentsInClub(c.id));
   const totalStudents = myStudents.filter(s => s.status === 'active').length;
@@ -2979,13 +2994,23 @@ function renderManagerDashboard(el) {
   el.innerHTML = `
     <div class="page-header">
       <div class="page-title-wrap">
-        <div class="page-title">Bună ziua, ${user.name.split(' ')[0]}! 👋</div>
-        <div class="page-sub">Cluburile tale: ${myClubs.map(c => c.name).join(', ')}</div>
+        <div class="page-title">Bună ziua, ${escapeHtml(user.name.split(' ')[0])}! 👋</div>
+        <div class="page-sub">${myClubs.length === 0 ? 'Niciun club asociat încă' : 'Cluburile tale: ' + myClubs.map(c => escapeHtml(c.name)).join(', ')}</div>
       </div>
       <div class="page-actions">
-        <button class="btn btn-primary" onclick="navigateTo('clubs')">${ICONS.building} Clubul meu</button>
+        <button class="btn btn-primary" onclick="navigateTo('clubs')">${ICONS.building} ${myClubs.length === 1 ? 'Clubul meu' : 'Cluburile mele'}</button>
       </div>
     </div>
+
+    ${myClubs.length === 0 ? `
+      <div class="alert-banner warning" style="margin-bottom:20px;">
+        <div class="alert-banner-icon">!</div>
+        <div class="alert-banner-content">
+          <div class="alert-banner-title">Niciun club nu este asociat contului tău</div>
+          <div class="alert-banner-desc">Administratorul trebuie să te seteze ca manager al unui club. Contactează-l pentru a fi alocat.</div>
+        </div>
+      </div>
+    ` : ''}
 
     ${myAlerts.length > 0 ? `
       <div style="margin-bottom:20px;">
@@ -2994,6 +3019,11 @@ function renderManagerDashboard(el) {
     ` : ''}
 
     <div class="stat-grid">
+      <div class="stat">
+        <div class="stat-icon">${ICONS.building}</div>
+        <div class="stat-label">Cluburi</div>
+        <div class="stat-value">${myClubs.length}</div>
+      </div>
       <div class="stat">
         <div class="stat-icon">${ICONS.users}</div>
         <div class="stat-label">Copii activi</div>
@@ -3009,14 +3039,42 @@ function renderManagerDashboard(el) {
         <div class="stat-label">Încasări club</div>
         <div class="stat-value">${myRevenue.toLocaleString('ro-RO')} <span style="font-size:14px;">lei</span></div>
       </div>
-      <div class="stat ${myAlerts.length > 0 ? 'danger' : ''}">
-        <div class="stat-icon">${ICONS.bell}</div>
-        <div class="stat-label">Alerte</div>
-        <div class="stat-value">${myAlerts.length}</div>
-      </div>
     </div>
 
-    <div class="card">
+    ${myClubs.length > 0 ? `
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Cluburile mele</div>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:14px;">
+          ${myClubs.map(c => `
+            <div class="club-card" onclick="navigateTo('club-detail', { clubId: '${c.id}' })" style="cursor:pointer;">
+              <div class="club-card-name">${escapeHtml(c.name)}</div>
+              <div class="club-card-address">${ICONS.mapPin} ${escapeHtml(c.address || '—')}</div>
+              <div class="row" style="font-size:12.5px; color:var(--text-soft); margin-top:6px;">
+                ${ICONS.phone} <span class="font-mono">${escapeHtml(c.phone || '—')}</span>
+              </div>
+              <div class="club-card-stats">
+                <div class="club-stat-item">
+                  <div class="club-stat-num">${getGroupsInClub(c.id).length}</div>
+                  <div class="club-stat-label">Grupe</div>
+                </div>
+                <div class="club-stat-item">
+                  <div class="club-stat-num">${getStudentsInClub(c.id).filter(s => s.status === 'active').length}</div>
+                  <div class="club-stat-label">Copii</div>
+                </div>
+                <div class="club-stat-item">
+                  <div class="club-stat-num">${c.capacity || 0}</div>
+                  <div class="club-stat-label">Capacitate</div>
+                </div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    ` : ''}
+
+    <div class="card mt-3">
       <div class="card-header">
         <div class="card-title">Programul de astăzi</div>
         <span class="badge badge-yellow">${todayGroups.length} grupe</span>
@@ -3024,7 +3082,8 @@ function renderManagerDashboard(el) {
       ${todayGroups.length === 0 ? `
         <div class="empty-state">
           <div class="empty-state-icon">${ICONS.calendar}</div>
-          <h3>Nicio grupă astăzi în clubul tău</h3>
+          <h3>Nicio grupă astăzi</h3>
+          <p>Grupele vor apărea aici după ce le creăm în Etapa 2.</p>
         </div>
       ` : `
         <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:10px;">
@@ -3036,7 +3095,8 @@ function renderManagerDashboard(el) {
 }
 
 function renderTeacherDashboard(el) {
-  const teacher = state.data.users.find(u => u.role === 'teacher');
+  const teacher = getCurrentUser();
+  if (!teacher) { el.innerHTML = '<div class="empty-state"><h3>Profil neîncărcat</h3></div>'; return; }
   const myGroups = state.data.groups.filter(g => g.teacherId === teacher.id);
   const todayDay = (new Date(TODAY).getDay() + 6) % 7;
   const todayMyGroups = myGroups.filter(g => g.day === todayDay);
@@ -3046,10 +3106,20 @@ function renderTeacherDashboard(el) {
   el.innerHTML = `
     <div class="page-header">
       <div class="page-title-wrap">
-        <div class="page-title">Bună, ${teacher.name.split(' ')[0]}! 👋</div>
+        <div class="page-title">Bună, ${escapeHtml(teacher.name.split(' ')[0])}! 👋</div>
         <div class="page-sub">${formatDate(TODAY, { weekday: 'long', day: 'numeric', month: 'long' })}</div>
       </div>
     </div>
+
+    ${myGroups.length === 0 ? `
+      <div class="alert-banner info" style="margin-bottom:20px;">
+        <div class="alert-banner-icon">i</div>
+        <div class="alert-banner-content">
+          <div class="alert-banner-title">Nicio grupă atribuită încă</div>
+          <div class="alert-banner-desc">Grupele se vor configura în Etapa 2 (managerul/admin-ul te va asocia la grupele tale).</div>
+        </div>
+      </div>
+    ` : ''}
 
     <div class="stat-grid">
       <div class="stat">
@@ -3448,9 +3518,8 @@ function hexToRgba(hex, alpha) {
 // ==========================================================================
 function renderClubs(el) {
   let clubs = state.data.clubs;
-  if (state.currentRole === 'manager') {
-    const user = state.data.users.find(u => u.role === 'manager');
-    clubs = clubs.filter(c => user.clubs && user.clubs.includes(c.id));
+  if (state.currentRole !== 'admin') {
+    clubs = getMyClubs();
   }
 
   el.innerHTML = `
@@ -4211,12 +4280,15 @@ let studentsFilter = { search: '', status: 'all', clubId: 'all', groupId: 'all',
 function renderStudents(el) {
   let students = [...state.data.students];
   if (state.currentRole === 'manager') {
-    const user = state.data.users.find(u => u.role === 'manager');
-    const myClubIds = user.clubs || [];
+    const myClubIds = getMyClubs().map(c => c.id);
     students = students.filter(s => {
       const g = getGroup(s.groupId);
       return g && myClubIds.includes(g.clubId);
     });
+  } else if (state.currentRole === 'teacher') {
+    const me = getCurrentUser();
+    const myGroupIds = me ? state.data.groups.filter(g => g.teacherId === me.id).map(g => g.id) : [];
+    students = students.filter(s => myGroupIds.includes(s.groupId));
   }
   // Apply filters
   if (studentsFilter.search) {
@@ -4239,9 +4311,7 @@ function renderStudents(el) {
     });
   }
 
-  const availableClubs = state.currentRole === 'manager'
-    ? state.data.clubs.filter(c => state.data.users.find(u => u.role === 'manager').clubs.includes(c.id))
-    : state.data.clubs;
+  const availableClubs = state.currentRole === 'admin' ? state.data.clubs : getMyClubs();
 
   el.innerHTML = `
     <div class="page-header">
@@ -4841,7 +4911,8 @@ function saveTeacher(id) {
 // MY GROUPS / MY STUDENTS (teacher views)
 // ==========================================================================
 function renderMyGroups(el) {
-  const teacher = state.data.users.find(u => u.role === 'teacher');
+  const teacher = getCurrentUser();
+  if (!teacher) { el.innerHTML = '<div class="empty-state"><h3>Profil neîncărcat</h3></div>'; return; }
   const myGroups = state.data.groups.filter(g => g.teacherId === teacher.id);
   el.innerHTML = `
     <div class="page-header">
@@ -4870,7 +4941,8 @@ function renderMyGroups(el) {
 }
 
 function renderMyStudents(el) {
-  const teacher = state.data.users.find(u => u.role === 'teacher');
+  const teacher = getCurrentUser();
+  if (!teacher) { el.innerHTML = '<div class="empty-state"><h3>Profil neîncărcat</h3></div>'; return; }
   const myGroups = state.data.groups.filter(g => g.teacherId === teacher.id);
   const myStudents = myGroups.flatMap(g => getStudentsInGroup(g.id));
   el.innerHTML = `
